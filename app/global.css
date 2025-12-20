@@ -1,0 +1,15 @@
+/* Stripe Elements height fix — SAFE */
+.__PrivateStripeElement {
+    width: 100%;
+    height: 100%;
+}
+
+.__PrivateStripeElement iframe {
+    width: 100%;
+    height: 100%;
+}
+
+/* Stripe Elements focus fix — SAFE */
+.__PrivateStripeElement:focus {
+    outline: none;
+}

@@ -8,7 +8,7 @@ import { useEffect } from 'react';
 /* =========================
    Toast system
    ========================= */
-type ToastType = 'error' | 'success';
+type ToastType = 'error' | 'success' | 'info';
 
 type Toast = {
     id: number;
@@ -28,11 +28,15 @@ function ToastContainer({
             {toasts.map((toast) => (
                 <div
                     key={toast.id}
-                    className={`relative px-5 py-4 pr-10 rounded-sm text-sm shadow-lg
+                    className={`relative px-5 py-4 pr-10 rounded-md text-sm shadow-none
                     ${
                         toast.type === 'error'
                             ? 'bg-red-600 text-red-50'
-                            : 'bg-green-600 text-green-50'
+                            : toast.type === 'success'
+                                ? 'bg-green-600 text-green-50'
+                                : toast.type === 'info'
+                                    ? 'bg-yellow-500 text-yellow-50'
+                                    : 'bg-gray-600 text-gray-50'
                     }`}
                 >
                     {/* CLOSE BUTTON */}
@@ -226,42 +230,57 @@ function RegisterForm({ pushToast }: { pushToast: (t: ToastType, m: string) => v
         try {
             const result = await saleorFetch(
                 `
-        mutation Register(
-          $email: String!
-          $password: String!
-          $firstName: String!
-          $lastName: String!
-        ) {
-          accountRegister(
-            input: {
-              email: $email
-              password: $password
-              firstName: $firstName
-              lastName: $lastName
-              redirectUrl: "https://pacificmule.com/login"
+            mutation Register(
+              $email: String!
+              $password: String!
+              $firstName: String!
+              $lastName: String!
+            ) {
+              accountRegister(
+                input: {
+                  email: $email
+                  password: $password
+                  firstName: $firstName
+                  lastName: $lastName
+                  redirectUrl: "https://pacificmule.com/login"
+                }
+              ) {
+                errors { message }
+              }
             }
-          ) {
-            errors { message }
-          }
-        }
-        `,
+            `,
                 { variables: { email, password, firstName, lastName } }
             );
 
-            const data = result?.data?.accountRegister;
-
-            if (data?.errors?.length) {
-                pushToast('error', data.errors[0].message);
+            if (result?.errors?.length) {
+                pushToast('error', result.errors[0].message);
                 return;
             }
 
-            pushToast('success', 'Check your email to confirm registration');
+            const errors = result?.data?.accountRegister?.errors ?? [];
+            if (errors.length) {
+                pushToast('error', errors[0].message);
+                return;
+            }
+
+            // SECURITY-SAFE MESSAGE
+            pushToast(
+                'success',
+                'If this email is not registered, you will receive a confirmation email.'
+            );
+            // очистка формы
+            setEmail('');
+            setFirstName('');
+            setLastName('');
+            setPassword('');
+            setPasswordConfirm('');
         } catch {
             pushToast('error', 'Registration failed');
         } finally {
             setLoading(false);
         }
     }
+
 
     return (
         <div className="space-y-6">
@@ -319,7 +338,15 @@ export default function LoginPage() {
         const email = params.get('email');
         const token = params.get('token');
 
-        // 1Email confirmation имеет приоритет
+        // PASSWORD RESET имеет высший приоритет
+        if (email && token && window.location.search.includes('token')) {
+            router.replace(
+                `/password-reset?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
+            );
+            return;
+        }
+
+        // Email confirmation (регистрация)
         if (email && token) {
             async function confirmEmail() {
                 const result = await saleorFetch(
@@ -341,7 +368,6 @@ export default function LoginPage() {
                     pushToast('success', 'Email successfully confirmed');
                 }
 
-                // очищаем URL
                 router.replace('/login');
             }
 
@@ -349,7 +375,7 @@ export default function LoginPage() {
             return;
         }
 
-        // 2Обычный заход — если есть активная сессия
+        // Обычный вход — если есть сессия
         const sessionToken = localStorage.getItem('saleor_token');
         if (sessionToken) {
             router.replace('/profile');
@@ -365,6 +391,7 @@ export default function LoginPage() {
             <div className="absolute top-6 left-6">
                 <button
                     type="button"
+                    onClick={() => router.push('/checkout')}
                     className="bg-[#2B3A4A] text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-[#111a2e] transition"
                 >
                     Checkout
