@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { saleorFetch } from '@/lib/saleor';
 
 /* =========================
    Reusable form field
@@ -34,6 +33,23 @@ function FormField({
     );
 }
 
+type ProfileUpdatePayload = {
+    firstName?: string;
+    lastName?: string;
+    shippingAddress?: {
+        streetAddress1?: string;
+        streetAddress2?: string;
+        city?: string;
+        countryArea?: string;
+        postalCode?: string;
+        country?: string;
+    };
+    password?: {
+        currentPassword: string;
+        newPassword: string;
+    };
+};
+
 /* =========================
    Page
    ========================= */
@@ -42,6 +58,7 @@ export default function ProfilePage() {
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
 
     // display
     const [email, setEmail] = useState('');
@@ -51,7 +68,6 @@ export default function ProfilePage() {
     const [lastName, setLastName] = useState('');
 
     // shipping
-    const [addressId, setAddressId] = useState<string | null>(null);
     const [street1, setStreet1] = useState('');
     const [street2, setStreet2] = useState('');
     const [city, setCity] = useState('');
@@ -65,212 +81,64 @@ export default function ProfilePage() {
     const [confirmPassword, setConfirmPassword] = useState('');
 
     /* =========================
-       Auth helpers (TS-safe)
-       ========================= */
-    function requireToken(): string {
-        const token = localStorage.getItem('saleor_token');
-        if (!token) {
-            localStorage.removeItem('saleor_token');
-            router.replace('/login');
-            throw new Error('No auth token');
-        }
-        return token;
-    }
-
-    function authHeaders(token: string): Record<string, string> {
-        return { Authorization: `Bearer ${token}` };
-    }
-
-    function logout() {
-        localStorage.removeItem('saleor_token');
-        router.replace('/login');
-    }
-
-    function forceLogout() {
-        localStorage.removeItem('saleor_token');
-        router.replace('/login');
-    }
-
-    /* =========================
        Load profile + shipping
        ========================= */
-    useEffect(() => {
-        let token: string;
+
+    async function loadProfile() {
+        setLoading(true);
+        setError(null);
+
         try {
-            token = requireToken();
-        } catch {
-            return;
-        }
+            const profileRes = await fetch('/api/profile', {
+                credentials: 'include',
+            });
 
-        async function loadProfile() {
-            try {
-                const res = await saleorFetch(
-                    `
-                    query Me {
-                      me {
-                        email
-                        firstName
-                        lastName
-                        defaultShippingAddress {
-                          id
-                          streetAddress1
-                          streetAddress2
-                          city
-                          postalCode
-                          countryArea
-                          country { code }
-                        }
-                      }
-                    }
-                    `,
-                    { headers: authHeaders(token) }
-                );
+            console.log('Profile load response:', profileRes.status);
 
-                const me = res?.data?.me;
-                if (!me) {
-                    forceLogout();
-                    return;
-                }
-
-                setEmail(me.email ?? '');
-                setFirstName(me.firstName ?? '');
-                setLastName(me.lastName ?? '');
-
-                if (me.defaultShippingAddress) {
-                    const a = me.defaultShippingAddress;
-                    setAddressId(a.id);
-                    setStreet1(a.streetAddress1 ?? '');
-                    setStreet2(a.streetAddress2 ?? '');
-                    setCity(a.city ?? '');
-                    setZip(a.postalCode ?? '');
-                    setState(a.countryArea ?? '');
-                    setCountry(a.country?.code ?? 'US');
-                }
-
-                setLoading(false);
-            } catch {
-                forceLogout();
+            if (!profileRes.ok) {
+                const errorText = await profileRes.text();
+                throw new Error(`Failed to load profile: ${errorText}`);
             }
-        }
 
+            const profileData = await profileRes.json();
+            console.log('Profile data:', profileData);
+
+            const me = profileData.me;
+
+            setEmail(me.email);
+            setFirstName(me.firstName ?? '');
+            setLastName(me.lastName ?? '');
+
+            const a = me.defaultShippingAddress;
+            if (a) {
+                setStreet1(a.streetAddress1 ?? '');
+                setStreet2(a.streetAddress2 ?? '');
+                setCity(a.city ?? '');
+                setZip(a.postalCode ?? '');
+                setState(a.countryArea ?? '');
+                setCountry(a.country?.code ?? 'US');
+            }
+        } catch (err) {
+            console.error('Load profile error:', err);
+            setError(err instanceof Error ? err.message : 'Failed to load profile');
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    useEffect(() => {
         loadProfile();
-    }, [router]);
+    }, []);
 
     /* =========================
        Submit
        ========================= */
     async function submit() {
-        let token: string;
-        try {
-            token = requireToken();
-        } catch {
-            return;
-        }
-
         setError(null);
+        setSuccess(false);
 
-        /* ---- Update profile ---- */
-        const profileRes = await saleorFetch(
-            `
-            mutation UpdateAccount($firstName: String!, $lastName: String!) {
-              accountUpdate(input: { firstName: $firstName, lastName: $lastName }) {
-                errors { message }
-              }
-            }
-            `,
-            {
-                headers: authHeaders(token),
-                variables: { firstName, lastName },
-            }
-        );
-
-        if (profileRes?.data?.accountUpdate?.errors?.length) {
-            setError(profileRes.data.accountUpdate.errors[0].message);
-            return;
-        }
-
-        /* ---- Create / update shipping address ---- */
-        let currentAddressId = addressId;
-
-        if (street1 && city && zip) {
-            const addressInput = {
-                streetAddress1: street1,
-                streetAddress2: street2 || null,
-                city,
-                postalCode: zip,
-                country,
-                countryArea: state || null,
-            };
-
-            if (!currentAddressId) {
-                const createRes = await saleorFetch(
-                    `
-                    mutation CreateAddress($input: AddressInput!) {
-                      accountAddressCreate(input: $input) {
-                        address { id }
-                        errors { message }
-                      }
-                    }
-                    `,
-                    {
-                        headers: authHeaders(token),
-                        variables: { input: addressInput },
-                    }
-                );
-
-                if (createRes?.data?.accountAddressCreate?.errors?.length) {
-                    setError(createRes.data.accountAddressCreate.errors[0].message);
-                    return;
-                }
-
-                currentAddressId =
-                    createRes?.data?.accountAddressCreate?.address?.id ?? null;
-
-                setAddressId(currentAddressId);
-            } else {
-                const updateRes = await saleorFetch(
-                    `
-                    mutation UpdateAddress($id: ID!, $input: AddressInput!) {
-                      accountAddressUpdate(id: $id, input: $input) {
-                        errors { message }
-                      }
-                    }
-                    `,
-                    {
-                        headers: authHeaders(token),
-                        variables: {
-                            id: currentAddressId,
-                            input: addressInput,
-                        },
-                    }
-                );
-
-                if (updateRes?.data?.accountAddressUpdate?.errors?.length) {
-                    setError(updateRes.data.accountAddressUpdate.errors[0].message);
-                    return;
-                }
-            }
-
-            /* ---- Set default shipping ---- */
-            if (currentAddressId) {
-                await saleorFetch(
-                    `
-                    mutation SetDefault($id: ID!) {
-                      accountSetDefaultAddress(id: $id, type: SHIPPING) {
-                        errors { message }
-                      }
-                    }
-                    `,
-                    {
-                        headers: authHeaders(token),
-                        variables: { id: currentAddressId },
-                    }
-                );
-            }
-        }
-
-        /* ---- Change password (optional) ---- */
-        if (newPassword) {
+        // Validation
+        if (newPassword || confirmPassword || currentPassword) {
             if (!currentPassword) {
                 setError('Current password is required');
                 return;
@@ -279,35 +147,81 @@ export default function ProfilePage() {
                 setError('Passwords do not match');
                 return;
             }
+        }
 
-            const pwdRes = await saleorFetch(
-                `
-                mutation ChangePassword($oldPassword: String!, $newPassword: String!) {
-                  accountChangePassword(oldPassword: $oldPassword, newPassword: $newPassword) {
-                    errors { message }
-                  }
-                }
-                `,
-                {
-                    headers: authHeaders(token),
-                    variables: {
-                        oldPassword: currentPassword,
-                        newPassword,
-                    },
-                }
-            );
+        // Build payload
+        const payload: ProfileUpdatePayload = {};
 
-            if (pwdRes?.data?.accountChangePassword?.errors?.length) {
-                setError(pwdRes.data.accountChangePassword.errors[0].message);
-                return;
+        // Only include fields that have changed or are required
+        if (firstName.trim() || lastName.trim()) {
+            payload.firstName = firstName.trim();
+            payload.lastName = lastName.trim();
+        }
+
+        // Shipping address
+        if (street1.trim() || city.trim() || zip.trim()) {
+            payload.shippingAddress = {
+                streetAddress1: street1.trim(),
+                streetAddress2: street2.trim(),
+                city: city.trim(),
+                countryArea: state.trim(),
+                postalCode: zip.trim(),
+                country: country.trim(),
+            };
+        }
+
+        // Password change
+        if (newPassword && currentPassword) {
+            payload.password = {
+                currentPassword,
+                newPassword,
+            };
+        }
+
+        // Check if there's anything to update
+        if (!payload.firstName && !payload.shippingAddress && !payload.password) {
+            setError('No changes to save');
+            return;
+        }
+
+        console.log('Sending payload:', payload);
+
+        try {
+            const res = await fetch('/api/profile', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',
+                body: JSON.stringify(payload),
+            });
+
+            console.log('Update response status:', res.status);
+
+            const data = await res.json();
+            console.log('Update response data:', data);
+
+            if (!res.ok) {
+                throw new Error(data.error || data.message || `Update failed with status ${res.status}`);
             }
 
+            // Clear password fields on success
             setCurrentPassword('');
             setNewPassword('');
             setConfirmPassword('');
-        }
 
-        alert('Profile updated');
+            // Reload profile to get updated data
+            await loadProfile();
+
+            setSuccess(true);
+
+            // Hide success message after 3 seconds
+            setTimeout(() => setSuccess(false), 3000);
+
+        } catch (err) {
+            console.error('Update error:', err);
+            setError(err instanceof Error ? err.message : 'Update failed');
+        }
     }
 
     if (loading) {
@@ -334,7 +248,10 @@ export default function ProfilePage() {
             {/* LOGOUT */}
             <div className="absolute bottom-6 left-15">
                 <button
-                    onClick={logout}
+                    onClick={async () => {
+                        await fetch('/api/logout', { method: 'POST' });
+                        router.replace('/login');
+                    }}
                     className="text-xs uppercase tracking-wide text-gray-500 hover:text-gray-800"
                 >
                     Logout →
@@ -353,8 +270,17 @@ export default function ProfilePage() {
                     </div>
                 )}
 
+                {success && (
+                    <div className="bg-green-100 text-green-700 text-sm p-3 rounded">
+                        Profile updated successfully!
+                    </div>
+                )}
+
                 {/* PROFILE */}
                 <section className="space-y-6">
+                    <h2 className="text-xs uppercase tracking-wide text-gray-600">
+                        Personal Information
+                    </h2>
                     <FormField label="First Name" value={firstName} onChange={setFirstName} />
                     <FormField label="Last Name" value={lastName} onChange={setLastName} />
                 </section>
@@ -387,7 +313,7 @@ export default function ProfilePage() {
 
                 <button
                     onClick={submit}
-                    className="bg-[#2B3A4A] text-white px-6 py-3 mb-24 uppercase text-sm tracking-wide rounded-sm"
+                    className="bg-[#2B3A4A] text-white px-6 py-3 mb-24 uppercase text-sm tracking-wide rounded-sm hover:bg-[#111a2e] transition"
                 >
                     Save →
                 </button>

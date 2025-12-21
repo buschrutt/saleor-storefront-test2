@@ -38,10 +38,13 @@ function FormField({ label, children }: FormFieldProps) {
     );
 }
 
-
 /* =========================
    Types
    ========================= */
+
+type CheckoutUser = {
+    email: string;
+};
 
 type Money = {
     amount: number;
@@ -60,8 +63,12 @@ type CheckoutLine = {
 
 type Checkout = {
     id: string;
+    user?: CheckoutUser | null;
+    shippingAddress?: Address | null;
     lines: CheckoutLine[];
-    subtotalPrice: { net: { amount: number } };
+    subtotalPrice: {
+        net: { amount: number };
+    };
     totalPrice: {
         net: { amount: number };
         gross: Money;
@@ -136,9 +143,7 @@ function PayForm({
                      billing,
                      setBilling,
                      taxReady,
-                     setTaxReady,
                      updatingTax,
-                     updateTaxFromAddress,
                      pushToast,
                  }: {
     clientSecret: string;
@@ -152,7 +157,7 @@ function PayForm({
 }) {
     const stripe = useStripe();
     const elements = useElements();
-
+    const router = useRouter();
     const [paying, setPaying] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -185,7 +190,10 @@ function PayForm({
             setError(result.error.message ?? 'Payment failed');
             setPaying(false);
         } else {
-            window.location.href = '/checkout/success';
+            pushToast('success', 'Payment successful. Redirecting…');
+            setTimeout(() => {
+                router.push('/profile');
+            }, 2000); // 2 секунды
         }
     }
 
@@ -294,6 +302,8 @@ function PayForm({
 export default function CheckoutPage() {
     const { toasts, pushToast, closeToast } = useToast();
     const router = useRouter();
+    const [user, setUser] = useState<{ email: string } | null>(null);
+    const isAuthenticated = Boolean(user);
     const [checkout, setCheckout] = useState<Checkout | null>(null);
     const [clientSecret, setClientSecret] = useState<string | null>(null);
     const [taxReady, setTaxReady] = useState(false);
@@ -316,10 +326,33 @@ export default function CheckoutPage() {
     });
 
     useEffect(() => {
+        fetch('/api/me')
+            .then(r => r.json())
+            .then(data => setUser(data.user))
+            .catch(() => setUser(null));
+    }, []);
+
+    useEffect(() => {
         if (checkout?.id) {
             console.log('CHECKOUT ID:', checkout.id);
         }
     }, [checkout]);
+
+    useEffect(() => {
+        if (!checkout?.shippingAddress || !isAuthenticated) return;
+
+        setAddress(a => ({
+            ...a,
+            fullName: checkout.shippingAddress!.fullName || '',
+            streetAddress1: checkout.shippingAddress!.streetAddress1 || '',
+            streetAddress2: checkout.shippingAddress!.streetAddress2 || '',
+            city: checkout.shippingAddress!.city || '',
+            country: checkout.shippingAddress!.country || 'US',
+            countryArea: '',   // ← ВСЕГДА вручную
+            postalCode: '',    // ← ВСЕГДА вручную
+        }));
+    }, [checkout?.shippingAddress, isAuthenticated]);
+
 
     useEffect(() => {
         fetch('/api/checkout/create', { method: 'POST' })
@@ -363,8 +396,14 @@ export default function CheckoutPage() {
     async function updateTaxFromAddress() {
         if (!checkout) return;
 
+        if (!address.streetAddress1 || !address.city) {
+            pushToast('info', 'Please enter street and city first');
+            setTaxReady(false);
+            return;
+        }
+
         if (!address.countryArea || address.countryArea.length < 2) {
-            pushToast('error', 'Please enter state before ZIP code');
+            pushToast('error', 'Please enter state');
             setTaxReady(false);
             return;
         }
@@ -378,12 +417,17 @@ export default function CheckoutPage() {
         setUpdatingTax(true);
 
         try {
-            const res = await fetch('/api/checkout/update-address', {
+            const res = await fetch('/api/checkout/address', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     checkoutId: checkout.id,
                     address: {
+                        firstName: address.fullName.split(' ')[0] || ' ',
+                        lastName: address.fullName.split(' ').slice(1).join(' ') || ' ',
+                        streetAddress1: address.streetAddress1,
+                        streetAddress2: address.streetAddress2 || '',
+                        city: address.city,
                         country: 'US',
                         countryArea: address.countryArea,
                         postalCode: address.postalCode,
@@ -391,14 +435,20 @@ export default function CheckoutPage() {
                 }),
             });
 
-            const data = await res.json();
+            const updatedCheckout = await res.json();
 
-            if (data.errors?.length) {
-                setTaxReady(false);
-                pushToast('error', 'Failed to calculate tax');
-            } else {
-                setTaxReady(true);
-            }
+            // 🔑 API ВОЗВРАЩАЕТ CHECKOUT НАПРЯМУЮ
+            setCheckout(prev =>
+                prev
+                    ? {
+                        ...prev,
+                        subtotalPrice: updatedCheckout.subtotalPrice,
+                        totalPrice: updatedCheckout.totalPrice,
+                    }
+                    : prev
+            );
+            setTaxReady(true);
+            pushToast('success', 'Address received. Tax updated');
         } catch {
             setTaxReady(false);
             pushToast('error', 'Tax calculation failed');
@@ -406,7 +456,6 @@ export default function CheckoutPage() {
             setUpdatingTax(false);
         }
     }
-
 
     return (
         <main className="min-h-screen bg-gray-100 px-6 pt-24">
@@ -459,105 +508,135 @@ export default function CheckoutPage() {
                 </div>
 
                 {/* RIGHT */}
-                <div className="space-y-20 w-full">
+                {/* RIGHT */}
+                <div className="w-full">
 
-                    {/* ADDRESS */}
-                    <section>
-                        <h2 className="mb-6 text-sm uppercase tracking-wide text-gray-700">
-                            Shipping Address
-                        </h2>
+                    {/* NOT AUTHENTICATED */}
+                    {!isAuthenticated && (
+                        <section className="space-y-4">
+                            <p className="text-sm text-gray-700">
+                                Please sign in to continue checkout
+                            </p>
 
-                        <div className="space-y-6">
+                            <button
+                                type="button"
+                                onClick={() => router.push('/login')}
+                                className="bg-[#2B3A4A] text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-[#111a2e] transition"
+                            >
+                                Sign in
+                            </button>
+                        </section>
+                    )}
 
-                            <FormField label="Full Name">
-                                <input
-                                    value={address.fullName}
-                                    onChange={(e) =>
-                                        setAddress(a => ({ ...a, fullName: e.target.value }))
-                                    }
-                                    className="w-full bg-transparent outline-none text-sm"
+                    {/* AUTHENTICATED */}
+                    {isAuthenticated && (
+                        <div className="space-y-20 w-full">
+
+                            {/* USER HEADER */}
+                            <section className="space-y-2 text-sm">
+                                <div className="text-gray-700">
+                                    <strong>{user!.email}</strong>
+                                </div>
+                            </section>
+
+                            {/* SHIPPING ADDRESS FORM */}
+                            <section>
+                                <h2 className="mb-6 text-sm uppercase tracking-wide text-gray-700">
+                                    Shipping Address
+                                </h2>
+
+                                <div className="space-y-6">
+                                    <FormField label="Full Name">
+                                        <input
+                                            value={address.fullName}
+                                            onChange={e =>
+                                                setAddress(a => ({ ...a, fullName: e.target.value }))
+                                            }
+                                            className="w-full bg-transparent outline-none text-sm"
+                                        />
+                                    </FormField>
+
+                                    <FormField label="Street Address">
+                                        <input
+                                            value={address.streetAddress1}
+                                            onChange={e =>
+                                                setAddress(a => ({ ...a, streetAddress1: e.target.value }))
+                                            }
+                                            className="w-full bg-transparent outline-none text-sm"
+                                        />
+                                    </FormField>
+
+                                    <FormField label="Street Address 2">
+                                        <input
+                                            value={address.streetAddress2}
+                                            onChange={e =>
+                                                setAddress(a => ({ ...a, streetAddress2: e.target.value }))
+                                            }
+                                            className="w-full bg-transparent outline-none text-sm"
+                                        />
+                                    </FormField>
+
+                                    <FormField label="City">
+                                        <input
+                                            value={address.city}
+                                            onChange={e =>
+                                                setAddress(a => ({ ...a, city: e.target.value }))
+                                            }
+                                            className="w-full bg-transparent outline-none text-sm"
+                                        />
+                                    </FormField>
+
+                                    <FormField label="State">
+                                        <input
+                                            value={address.countryArea}
+                                            onChange={e => {
+                                                setAddress(a => ({
+                                                    ...a,
+                                                    countryArea: e.target.value.toUpperCase(),
+                                                }));
+                                                setTaxReady(false);
+                                            }}
+                                            className="w-full bg-transparent outline-none text-sm"
+                                            placeholder="TX"
+                                        />
+                                    </FormField>
+
+                                    <FormField label="ZIP Code">
+                                        <input
+                                            value={address.postalCode}
+                                            onChange={e =>
+                                                setAddress(a => ({ ...a, postalCode: e.target.value }))
+                                            }
+                                            onBlur={updateTaxFromAddress}
+                                            className="w-full bg-transparent outline-none text-sm"
+                                            placeholder="78717"
+                                        />
+                                    </FormField>
+                                </div>
+                            </section>
+
+                            {/* PAYMENT */}
+                            <StripeProvider clientSecret={clientSecret}>
+                                <PayForm
+                                    clientSecret={clientSecret}
+                                    billing={billing}
+                                    setBilling={setBilling}
+                                    taxReady={taxReady}
+                                    setTaxReady={setTaxReady}
+                                    updatingTax={updatingTax}
+                                    updateTaxFromAddress={updateTaxFromAddress}
+                                    pushToast={pushToast}
                                 />
-                            </FormField>
-
-                            <FormField label="Street Address">
-                                <input
-                                    value={address.streetAddress1}
-                                    onChange={(e) =>
-                                        setAddress(a => ({ ...a, streetAddress1: e.target.value }))
-                                    }
-                                    className="w-full bg-transparent outline-none text-sm"
-                                />
-                            </FormField>
-
-                            <FormField label="Street Address 2">
-                                <input
-                                    value={address.streetAddress2}
-                                    onChange={(e) =>
-                                        setAddress(a => ({ ...a, streetAddress2: e.target.value }))
-                                    }
-                                    className="w-full bg-transparent outline-none text-sm"
-                                />
-                            </FormField>
-
-                            <FormField label="City">
-                                <input
-                                    value={address.city}
-                                    onChange={(e) =>
-                                        setAddress(a => ({ ...a, city: e.target.value }))
-                                    }
-                                    className="w-full bg-transparent outline-none text-sm"
-                                />
-                            </FormField>
-
-                            {/* 🔑 STATE — сбрасывает налог */}
-                            <FormField label="State">
-                                <input
-                                    value={address.countryArea}
-                                    onChange={(e) => {
-                                        setAddress(a => ({
-                                            ...a,
-                                            countryArea: e.target.value.toUpperCase(),
-                                        }));
-                                        setTaxReady(false);
-                                    }}
-                                    className="w-full bg-transparent outline-none text-sm"
-                                />
-                            </FormField>
-
-                            {/* 🔑 ZIP — ТОЛЬКО ТУТ onBlur */}
-                            <FormField label="ZIP Code">
-                                <input
-                                    value={address.postalCode}
-                                    onChange={(e) =>
-                                        setAddress(a => ({
-                                            ...a,
-                                            postalCode: e.target.value,
-                                        }))
-                                    }
-                                    onBlur={updateTaxFromAddress}
-                                    className="w-full bg-transparent outline-none text-sm"
-                                />
-                            </FormField>
-
+                            </StripeProvider>
                         </div>
-                    </section>
-
-                    {/* PAYMENT */}
-                    <StripeProvider clientSecret={clientSecret}>
-                        <PayForm
-                            clientSecret={clientSecret}
-                            billing={billing}
-                            setBilling={setBilling}
-                            taxReady={taxReady}
-                            setTaxReady={setTaxReady}
-                            updatingTax={updatingTax}
-                            updateTaxFromAddress={updateTaxFromAddress}
-                            pushToast={pushToast}
-                        />
-                    </StripeProvider>
-
+                    )}
                 </div>
+
+
+
+
             </div>
+
         </main>
     );
 }

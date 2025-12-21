@@ -98,26 +98,20 @@ function LoginForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void
         setLoadingSignIn(true);
 
         try {
-            const result = await saleorFetch(
-                `
-        mutation TokenCreate($email: String!, $password: String!) {
-          tokenCreate(email: $email, password: $password) {
-            token
-            errors { message }
-          }
-        }
-        `,
-                { variables: { email, password } }
-            );
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password }),
+            });
 
-            const data = result?.data?.tokenCreate;
+            const data = await res.json();
 
-            if (data?.errors?.length) {
-                pushToast('error', data.errors[0].message);
+            if (!res.ok) {
+                pushToast('error', data.error || 'Invalid credentials');
                 return;
             }
 
-            localStorage.setItem('saleor_token', data.token);
+            // ✅ cookie уже установлена сервером
             pushToast('success', 'Successfully signed in');
             window.location.href = '/profile';
         } catch {
@@ -126,6 +120,7 @@ function LoginForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void
             setLoadingSignIn(false);
         }
     }
+
 
     async function recover() {
         if (!recoveryEmail.trim()) {
@@ -375,11 +370,6 @@ export default function LoginPage() {
             return;
         }
 
-        // Обычный вход — если есть сессия
-        const sessionToken = localStorage.getItem('saleor_token');
-        if (sessionToken) {
-            router.replace('/profile');
-        }
     }, [params, router]);
 
 
