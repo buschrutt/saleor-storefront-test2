@@ -1,5 +1,7 @@
 'use client';
 
+import { useToast } from '@/app/components/useToast';
+import ToastContainer from '@/app/components/ToastContainer';
 import React, { useEffect, useState } from 'react';
 import {
     CardNumberElement,
@@ -9,6 +11,7 @@ import {
     useElements,
 } from '@stripe/react-stripe-js';
 import StripeProvider from './StripeProvider';
+import { useRouter } from 'next/navigation';
 
 /* =========================
    Reusable FormField
@@ -81,24 +84,6 @@ type Billing = {
     country: string;
 };
 
-type AddressField = {
-    label: string;
-    key: keyof Address;
-};
-
-/* =========================
-   Address fields
-   ========================= */
-
-const ADDRESS_FIELDS: AddressField[] = [
-    { label: 'Full Name', key: 'fullName' },
-    { label: 'Street Address', key: 'streetAddress1' },
-    { label: 'Street Address 2', key: 'streetAddress2' },
-    { label: 'City', key: 'city' },
-    { label: 'State', key: 'countryArea' },
-    { label: 'ZIP Code', key: 'postalCode' },
-];
-
 /* =========================
    Stripe card style
    ========================= */
@@ -132,26 +117,38 @@ function StripeField({
     children: React.ReactNode;
 }) {
     return (
-        <div className="w-full">
-            <div className="mb-1 px-1 text-xs tracking-wide text-gray-600">
+        <fieldset className="w-full border border-gray-300 px-3 pb-3 pt-1 rounded-md">
+            <legend className="px-1 text-xs tracking-wide text-gray-600">
                 {label}
+            </legend>
+            <div className="pt-1 w-full">
+                <div className="w-full min-h-10 py-2">
+                    {children}
+                </div>
             </div>
-
-            <div className="w-full border border-gray-300 rounded-md px-3 py-3">
-                {children}
-            </div>
-        </div>
+        </fieldset>
     );
 }
+
 
 function PayForm({
                      clientSecret,
                      billing,
                      setBilling,
+                     taxReady,
+                     setTaxReady,
+                     updatingTax,
+                     updateTaxFromAddress,
+                     pushToast,
                  }: {
     clientSecret: string;
     billing: Billing;
     setBilling: React.Dispatch<React.SetStateAction<Billing>>;
+    taxReady: boolean;
+    setTaxReady: React.Dispatch<React.SetStateAction<boolean>>;
+    updatingTax: boolean;
+    updateTaxFromAddress: () => Promise<void>;
+    pushToast: (t: 'error' | 'success' | 'info', m: string) => void;
 }) {
     const stripe = useStripe();
     const elements = useElements();
@@ -159,17 +156,17 @@ function PayForm({
     const [paying, setPaying] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        console.log('Debug Stripe/Elements:');
-        console.log('- Stripe loaded:', stripe ? 'YES' : 'NO');
-        console.log('- Elements loaded:', elements ? 'YES' : 'NO');
-        console.log('- Client secret:', clientSecret ? 'YES' : 'NO');
-    }, [stripe, elements, clientSecret]);
-
     async function pay() {
+        // Налог не готов — платёж запрещён
+        if (!taxReady) {
+            pushToast('error', 'Please enter shipping address to calculate tax');
+            return;
+        }
+
         if (!stripe || !elements) return;
 
         setPaying(true);
+        setError(null);
 
         const result = await stripe.confirmCardPayment(clientSecret, {
             payment_method: {
@@ -194,86 +191,113 @@ function PayForm({
 
     return (
         <section className="pt-12 border-t border-gray-200 w-full">
-        <br/><br/>
-            <h2 className="mb-6 text-sm uppercase tracking-wide text-gray-700">
+            <br/><br/><h2 className="mb-6 text-sm uppercase tracking-wide text-gray-700">
                 Card Payment Details
             </h2>
 
-            {/* Card fields — по одному в строке */}
+            {/* STRIPE CARD FIELDS */}
             <div className="space-y-6 w-full">
+                <StripeField label="Card Number">
+                    <CardNumberElement className="w-full" options={CARD_STYLE} />
+                </StripeField>
+                <StripeField label="MM / YY">
+                    <CardExpiryElement className="w-full" options={CARD_STYLE} />
+                </StripeField>
+                <StripeField label="CVC">
+                    <CardCvcElement className="w-full" options={CARD_STYLE} />
+                </StripeField>
+            </div><br/>
+
+            {/* BILLING */}
+            <div className="space-y-6 w-full mt-8">
+                {/* Billing — нужно Stripe */}
                 <div className="space-y-6 w-full">
-                    <StripeField label="Card Number">
-                        <CardNumberElement options={CARD_STYLE} />
-                    </StripeField>
+                    <FormField label="ZIP Code">
+                        <input
+                            value={billing.postalCode}
+                            onChange={(e) =>
+                                setBilling(b => ({ ...b, postalCode: e.target.value }))
+                            }
+                            className="w-full bg-transparent outline-none text-sm"
+                        />
+                    </FormField>
 
-                    <StripeField label="MM / YY">
-                        <CardExpiryElement options={CARD_STYLE} />
-                    </StripeField>
+                    <FormField label="State">
+                        <input
+                            value={billing.state}
+                            onChange={(e) =>
+                                setBilling(b => ({ ...b, state: e.target.value }))
+                            }
+                            className="w-full bg-transparent outline-none text-sm"
+                        />
+                    </FormField>
 
-                    <StripeField label="CVC">
-                        <CardCvcElement options={CARD_STYLE} />
-                    </StripeField>
+                    {updatingTax && (
+                        <p className="text-sm text-gray-500 mt-2">
+                            Calculating tax…
+                        </p>
+                    )}
+
+                    <FormField label="Country">
+                        <select
+                            value={billing.country}
+                            onChange={(e) =>
+                                setBilling(b => ({ ...b, country: e.target.value }))
+                            }
+                            className="w-full bg-transparent outline-none text-sm"
+                        >
+                            <option value="US">United States</option>
+                        </select>
+                    </FormField>
                 </div>
             </div>
-            <br/>
-            {/* Billing — тоже по одному в строке */}
-            <div className="space-y-6 w-full">
-                <FormField label="ZIP Code">
-                    <input
-                        value={billing.postalCode}
-                        onChange={(e) =>
-                            setBilling(b => ({ ...b, postalCode: e.target.value }))
-                        }
-                        className="w-full bg-transparent outline-none text-sm"
-                    />
-                </FormField>
 
-                <FormField label="State">
-                    <input
-                        value={billing.state}
-                        onChange={(e) =>
-                            setBilling(b => ({ ...b, state: e.target.value }))
-                        }
-                        className="w-full bg-transparent outline-none text-sm"
-                    />
-                </FormField>
+            {/* ADDRESS / TAX ERRORS */}
 
-                <FormField label="Country">
-                    <select
-                        value={billing.country}
-                        onChange={(e) =>
-                            setBilling(b => ({ ...b, country: e.target.value }))
-                        }
-                        className="w-full bg-transparent outline-none text-sm"
-                    >
-                        <option value="US">United States</option>
-                    </select>
-                </FormField>
-            </div>
-
-            {error && (
-                <p className="text-sm text-red-600">{error}</p>
+            {updatingTax && (
+                <p className="text-sm text-gray-500 mt-2">
+                    Calculating tax…
+                </p>
             )}
 
-            <br/><button
+            {/* PAYMENT ERROR */}
+            {error && (
+                <p className="text-sm text-red-600 mt-4">
+                    {error}
+                </p>
+            )}
+
+            {/* PAY BUTTON */}
+            <br/>
+            <button
                 type="button"
                 onClick={pay}
-                disabled={!stripe || paying}
-                className="bg-[#2B3A4A] text-white px-6 py-3 mb-24 uppercase text-sm tracking-wide rounded-sm"
+                disabled={!stripe || paying || !taxReady}
+                className={`bg-[#2B3A4A] text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-[#111a2e] transition
+                    ${taxReady
+                    ? 'bg-[#2B3A4A] text-white'
+                    : 'bg-gray-400 text-gray-100 cursor-not-allowed'}
+                `}
             >
                 {paying ? 'Processing…' : 'PAY →'}
             </button>
+            <br/><br/><br/>
         </section>
     );
 }
+
 
 /* =========================
    Page
    ========================= */
 
 export default function CheckoutPage() {
+    const { toasts, pushToast, closeToast } = useToast();
+    const router = useRouter();
     const [checkout, setCheckout] = useState<Checkout | null>(null);
     const [clientSecret, setClientSecret] = useState<string | null>(null);
+    const [taxReady, setTaxReady] = useState(false);
+    const [updatingTax, setUpdatingTax] = useState(false);
 
     const [address, setAddress] = useState<Address>({
         fullName: '',
@@ -290,6 +314,12 @@ export default function CheckoutPage() {
         state: '',
         country: 'US',
     });
+
+    useEffect(() => {
+        if (checkout?.id) {
+            console.log('CHECKOUT ID:', checkout.id);
+        }
+    }, [checkout]);
 
     useEffect(() => {
         fetch('/api/checkout/create', { method: 'POST' })
@@ -328,10 +358,69 @@ export default function CheckoutPage() {
     const totalNet = checkout.totalPrice.net.amount;
     const totalGross = checkout.totalPrice.gross.amount;
     const currency = checkout.totalPrice.gross.currency;
-
     const tax = +(totalGross - totalNet).toFixed(2);
+
+    async function updateTaxFromAddress() {
+        if (!checkout) return;
+
+        if (!address.countryArea || address.countryArea.length < 2) {
+            pushToast('error', 'Please enter state before ZIP code');
+            setTaxReady(false);
+            return;
+        }
+
+        if (!/^\d{5}$/.test(address.postalCode)) {
+            pushToast('error', 'ZIP code must be 5 digits');
+            setTaxReady(false);
+            return;
+        }
+
+        setUpdatingTax(true);
+
+        try {
+            const res = await fetch('/api/checkout/update-address', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    checkoutId: checkout.id,
+                    address: {
+                        country: 'US',
+                        countryArea: address.countryArea,
+                        postalCode: address.postalCode,
+                    },
+                }),
+            });
+
+            const data = await res.json();
+
+            if (data.errors?.length) {
+                setTaxReady(false);
+                pushToast('error', 'Failed to calculate tax');
+            } else {
+                setTaxReady(true);
+            }
+        } catch {
+            setTaxReady(false);
+            pushToast('error', 'Tax calculation failed');
+        } finally {
+            setUpdatingTax(false);
+        }
+    }
+
+
     return (
         <main className="min-h-screen bg-gray-100 px-6 pt-24">
+            {/* TOASTS */}
+            <ToastContainer toasts={toasts} onClose={closeToast} />
+            <div className="max-w-6xl mx-auto mb-6">
+                <button
+                    type="button"
+                    onClick={() => router.push('/profile')}
+                    className="bg-[#2B3A4A] text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-[#111a2e] transition"
+                >
+                    Profile
+                </button>
+            </div>
             <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-12">
 
                 {/* LEFT */}
@@ -375,33 +464,95 @@ export default function CheckoutPage() {
                     {/* ADDRESS */}
                     <section>
                         <h2 className="mb-6 text-sm uppercase tracking-wide text-gray-700">
-                            Shipping & Billing Address
+                            Shipping Address
                         </h2>
 
                         <div className="space-y-6">
-                            {ADDRESS_FIELDS.map(({ label, key }) => (
-                                <FormField key={key} label={label}>
-                                    <input
-                                        value={address[key]}
-                                        onChange={(e) =>
-                                            setAddress(a => ({
-                                                ...a,
-                                                [key]: e.target.value,
-                                            }))
-                                        }
-                                        className="w-full bg-transparent outline-none text-sm"
-                                    />
-                                </FormField>
-                            ))}
+
+                            <FormField label="Full Name">
+                                <input
+                                    value={address.fullName}
+                                    onChange={(e) =>
+                                        setAddress(a => ({ ...a, fullName: e.target.value }))
+                                    }
+                                    className="w-full bg-transparent outline-none text-sm"
+                                />
+                            </FormField>
+
+                            <FormField label="Street Address">
+                                <input
+                                    value={address.streetAddress1}
+                                    onChange={(e) =>
+                                        setAddress(a => ({ ...a, streetAddress1: e.target.value }))
+                                    }
+                                    className="w-full bg-transparent outline-none text-sm"
+                                />
+                            </FormField>
+
+                            <FormField label="Street Address 2">
+                                <input
+                                    value={address.streetAddress2}
+                                    onChange={(e) =>
+                                        setAddress(a => ({ ...a, streetAddress2: e.target.value }))
+                                    }
+                                    className="w-full bg-transparent outline-none text-sm"
+                                />
+                            </FormField>
+
+                            <FormField label="City">
+                                <input
+                                    value={address.city}
+                                    onChange={(e) =>
+                                        setAddress(a => ({ ...a, city: e.target.value }))
+                                    }
+                                    className="w-full bg-transparent outline-none text-sm"
+                                />
+                            </FormField>
+
+                            {/* 🔑 STATE — сбрасывает налог */}
+                            <FormField label="State">
+                                <input
+                                    value={address.countryArea}
+                                    onChange={(e) => {
+                                        setAddress(a => ({
+                                            ...a,
+                                            countryArea: e.target.value.toUpperCase(),
+                                        }));
+                                        setTaxReady(false);
+                                    }}
+                                    className="w-full bg-transparent outline-none text-sm"
+                                />
+                            </FormField>
+
+                            {/* 🔑 ZIP — ТОЛЬКО ТУТ onBlur */}
+                            <FormField label="ZIP Code">
+                                <input
+                                    value={address.postalCode}
+                                    onChange={(e) =>
+                                        setAddress(a => ({
+                                            ...a,
+                                            postalCode: e.target.value,
+                                        }))
+                                    }
+                                    onBlur={updateTaxFromAddress}
+                                    className="w-full bg-transparent outline-none text-sm"
+                                />
+                            </FormField>
+
                         </div>
                     </section>
 
                     {/* PAYMENT */}
-                    <StripeProvider>
+                    <StripeProvider clientSecret={clientSecret}>
                         <PayForm
                             clientSecret={clientSecret}
                             billing={billing}
                             setBilling={setBilling}
+                            taxReady={taxReady}
+                            setTaxReady={setTaxReady}
+                            updatingTax={updatingTax}
+                            updateTaxFromAddress={updateTaxFromAddress}
+                            pushToast={pushToast}
                         />
                     </StripeProvider>
 
