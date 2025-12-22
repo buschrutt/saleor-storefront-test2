@@ -50,6 +50,26 @@ type ProfileUpdatePayload = {
     };
 };
 
+// Helper function to safely get error message
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    if (typeof error === 'string') {
+        return error;
+    }
+    return 'An unknown error occurred';
+}
+
+// Helper function to check if is auth error
+function isAuthError(error: unknown): boolean {
+    const message = getErrorMessage(error).toLowerCase();
+    return message.includes('401') ||
+        message.includes('403') ||
+        message.includes('unauthorized') ||
+        message.includes('forbidden');
+}
+
 /* =========================
    Page
    ========================= */
@@ -59,6 +79,7 @@ export default function ProfilePage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
     // display
     const [email, setEmail] = useState('');
@@ -81,54 +102,71 @@ export default function ProfilePage() {
     const [confirmPassword, setConfirmPassword] = useState('');
 
     /* =========================
-       Load profile + shipping
+       Check authentication and load profile
        ========================= */
-
-    async function loadProfile() {
-        setLoading(true);
-        setError(null);
-
-        try {
-            const profileRes = await fetch('/api/profile', {
-                credentials: 'include',
-            });
-
-            console.log('Profile load response:', profileRes.status);
-
-            if (!profileRes.ok) {
-                const errorText = await profileRes.text();
-                throw new Error(`Failed to load profile: ${errorText}`);
-            }
-
-            const profileData = await profileRes.json();
-            console.log('Profile data:', profileData);
-
-            const me = profileData.me;
-
-            setEmail(me.email);
-            setFirstName(me.firstName ?? '');
-            setLastName(me.lastName ?? '');
-
-            const a = me.defaultShippingAddress;
-            if (a) {
-                setStreet1(a.streetAddress1 ?? '');
-                setStreet2(a.streetAddress2 ?? '');
-                setCity(a.city ?? '');
-                setZip(a.postalCode ?? '');
-                setState(a.countryArea ?? '');
-                setCountry(a.country?.code ?? 'US');
-            }
-        } catch (err) {
-            console.error('Load profile error:', err);
-            setError(err instanceof Error ? err.message : 'Failed to load profile');
-        } finally {
-            setLoading(false);
-        }
-    }
-
     useEffect(() => {
-        loadProfile();
-    }, []);
+        async function checkAuthAndLoadProfile() {
+            setLoading(true);
+            setError(null);
+
+            try {
+                const profileRes = await fetch('/api/profile', {
+                    credentials: 'include',
+                });
+
+                console.log('Profile load response:', profileRes.status);
+
+                if (profileRes.status === 401 || profileRes.status === 403) {
+                    // Not authenticated, redirect to log
+                    setIsAuthenticated(false);
+                    router.replace('/login');
+                    return;
+                }
+
+                if (!profileRes.ok) {
+                    const errorText = await profileRes.text();
+                    throw new Error(`Failed to load profile: ${errorText}`);
+                }
+
+                const profileData = await profileRes.json();
+                console.log('Profile data:', profileData);
+
+                const me = profileData.me;
+
+                if (!me) {
+                    throw new Error('No user data received');
+                }
+
+                setIsAuthenticated(true);
+                setEmail(me.email);
+                setFirstName(me.firstName ?? '');
+                setLastName(me.lastName ?? '');
+
+                const a = me.defaultShippingAddress;
+                if (a) {
+                    setStreet1(a.streetAddress1 ?? '');
+                    setStreet2(a.streetAddress2 ?? '');
+                    setCity(a.city ?? '');
+                    setZip(a.postalCode ?? '');
+                    setState(a.countryArea ?? '');
+                    setCountry(a.country?.code ?? 'US');
+                }
+            } catch (err) {
+                console.error('Load profile error:', err);
+
+                if (isAuthError(err)) {
+                    setIsAuthenticated(false);
+                    router.replace('/login');
+                } else {
+                    setError(getErrorMessage(err));
+                }
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        checkAuthAndLoadProfile();
+    }, [router]);
 
     /* =========================
        Submit
@@ -198,6 +236,11 @@ export default function ProfilePage() {
 
             console.log('Update response status:', res.status);
 
+            if (res.status === 401 || res.status === 403) {
+                router.replace('/login');
+                return;
+            }
+
             const data = await res.json();
             console.log('Update response data:', data);
 
@@ -215,21 +258,74 @@ export default function ProfilePage() {
 
             setSuccess(true);
 
-            // Hide success message after 3 seconds
+            // Hide a success message after 3 seconds
             setTimeout(() => setSuccess(false), 3000);
 
         } catch (err) {
             console.error('Update error:', err);
-            setError(err instanceof Error ? err.message : 'Update failed');
+            setError(getErrorMessage(err));
         }
     }
 
+    // Separate load function for reuse
+    async function loadProfile() {
+        try {
+            const profileRes = await fetch('/api/profile', {
+                credentials: 'include',
+            });
+
+            if (profileRes.status === 401 || profileRes.status === 403) {
+                router.replace('/login');
+                return;
+            }
+
+            if (!profileRes.ok) {
+                throw new Error(`Failed to load profile: ${profileRes.status}`);
+            }
+
+            const profileData = await profileRes.json();
+            const me = profileData.me;
+
+            setEmail(me.email);
+            setFirstName(me.firstName ?? '');
+            setLastName(me.lastName ?? '');
+
+            const a = me.defaultShippingAddress;
+            if (a) {
+                setStreet1(a.streetAddress1 ?? '');
+                setStreet2(a.streetAddress2 ?? '');
+                setCity(a.city ?? '');
+                setZip(a.postalCode ?? '');
+                setState(a.countryArea ?? '');
+                setCountry(a.country?.code ?? 'US');
+            }
+        } catch (err) {
+            console.error('Load profile error:', err);
+            if (isAuthError(err)) {
+                router.replace('/login');
+            }
+        }
+    }
+
+    // Show loading or redirect state
     if (loading) {
         return (
             <div className="p-8 text-sm uppercase tracking-wide text-gray-500">
                 Loading profile…
             </div>
         );
+    }
+
+    if (isAuthenticated === false) {
+        return (
+            <div className="p-8 text-sm uppercase tracking-wide text-gray-500">
+                Redirecting to login…
+            </div>
+        );
+    }
+
+    if (!isAuthenticated) {
+        return null; // or a loading spinner while redirecting
     }
 
     return (
