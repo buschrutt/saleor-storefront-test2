@@ -234,8 +234,15 @@ export default function ProfilePage() {
 
     return (
         <main className="min-h-screen bg-gray-100 relative">
-            {/* CHECKOUT button */}
-            <div className="absolute top-6 left-6">
+            <div className="absolute top-6 left-6 flex flex-col gap-3">
+                <button
+                    type="button"
+                    onClick={() => router.push('/')}
+                    className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
+                >
+                    Main
+                </button>
+
                 <button
                     type="button"
                     onClick={() => router.push('/checkout')}
@@ -243,16 +250,13 @@ export default function ProfilePage() {
                 >
                     Checkout
                 </button>
-            </div>
 
-            {/* LOGOUT */}
-            <div className="absolute bottom-6 left-15">
                 <button
                     onClick={async () => {
                         await fetch('/api/logout', { method: 'POST' });
                         router.replace('/login');
                     }}
-                    className="text-xs uppercase tracking-wide text-gray-500 hover:text-gray-800"
+                    className="bg-[#2B3A4A] text-white px-4 py-3 uppercase text-sm tracking-wide rounded-sm hover:bg-[#111a2e] transition"
                 >
                     Logout →
                 </button>

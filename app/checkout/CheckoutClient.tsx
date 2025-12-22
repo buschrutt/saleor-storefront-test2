@@ -470,7 +470,15 @@ export default function CheckoutClient({
         <main className="min-h-screen bg-gray-100 px-6 pt-24">
             {/* TOASTS */}
             <ToastContainer toasts={toasts} onClose={closeToast} />
-            <div className="max-w-6xl mx-auto mb-6">
+            <div className="max-w-6xl mx-auto mb-6 flex gap-3">
+                <button
+                    type="button"
+                    onClick={() => router.push('/')}
+                    className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
+                >
+                    Main
+                </button>
+
                 <button
                     type="button"
                     onClick={() => router.push('/profile')}

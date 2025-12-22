@@ -177,7 +177,7 @@ function LoginForm({
                 onChange={setPassword}
             />
 
-            <button onClick={signIn} disabled={loadingSignIn}>
+            <button onClick={signIn} disabled={loadingSignIn} className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition">
                 {loadingSignIn ? 'Signing In…' : 'Sign In'}
             </button>
 
@@ -188,7 +188,7 @@ function LoginForm({
                 onChange={setRecoveryEmail}
             />
 
-            <button onClick={recover} disabled={loadingRecover}>
+            <button onClick={recover} disabled={loadingRecover} className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition">
                 {loadingRecover ? 'Recovering…' : 'Recover'}
             </button>
         </div>
@@ -289,7 +289,7 @@ function RegisterForm({
                 onChange={setPasswordConfirm}
             />
 
-            <button onClick={submit} disabled={loading}>
+            <button onClick={submit} disabled={loading} className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition">
                 {loading ? 'Signing Up…' : 'Sign Up'}
             </button>
         </div>
@@ -358,10 +358,17 @@ export default function LoginClient() {
         <main className="min-h-screen bg-gray-100 relative">
             <ToastContainer toasts={toasts} onClose={closeToast} />
 
-            <div className="absolute top-6 left-6">
+            <div className="absolute top-6 left-6 flex flex-col gap-3">
+                <button
+                    onClick={() => router.push('/')}
+                    className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
+                >
+                    Main
+                </button>
+
                 <button
                     onClick={() => router.push('/checkout')}
-                    className="bg-[#2B3A4A] text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide"
+                    className="bg-[#2B3A4A] text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-[#111a2e] transition"
                 >
                     Checkout
                 </button>
