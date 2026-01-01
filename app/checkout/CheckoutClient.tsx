@@ -342,10 +342,20 @@ export default function CheckoutClient({
     }, []);
 
     useEffect(() => {
-        if (checkout?.id) {
-            console.log('CHECKOUT ID:', checkout.id);
-        }
-    }, [checkout]);
+        if (!checkout || !taxReady) return;
+
+        fetch('/api/checkout/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                amount: checkout.totalPrice.gross.amount,
+                currency: checkout.totalPrice.gross.currency,
+            }),
+        })
+            .then(r => r.json())
+            .then(d => setClientSecret(d.clientSecret));
+    }, [checkout, taxReady]);
+
 
     useEffect(() => {
         if (!checkout?.shippingAddress || !isAuthenticated) return;
