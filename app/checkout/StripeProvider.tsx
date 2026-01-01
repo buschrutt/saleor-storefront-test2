@@ -19,7 +19,7 @@ export default function StripeProvider({
         <Elements
             stripe={stripePromise}
             options={{ clientSecret }}
-            key={clientSecret}   // 🔥 КРИТИЧЕСКИ ВАЖНО
+            key={clientSecret}   // КРИТИЧЕСКИ ВАЖНО
         >
             {children}
         </Elements>

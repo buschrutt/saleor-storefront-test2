@@ -590,6 +590,7 @@ export default function CheckoutClient({
                                                 setAddress(a => ({ ...a, fullName: e.target.value }))
                                             }
                                             className="w-full bg-transparent outline-none text-sm"
+                                            placeholder="John Doe"
                                         />
                                     </FormField>
 
@@ -600,6 +601,7 @@ export default function CheckoutClient({
                                                 setAddress(a => ({ ...a, streetAddress1: e.target.value }))
                                             }
                                             className="w-full bg-transparent outline-none text-sm"
+                                            placeholder="123 Main St"
                                         />
                                     </FormField>
 
@@ -620,6 +622,7 @@ export default function CheckoutClient({
                                                 setAddress(a => ({ ...a, city: e.target.value }))
                                             }
                                             className="w-full bg-transparent outline-none text-sm"
+                                            placeholder="Austin"
                                         />
                                     </FormField>
 
@@ -629,12 +632,12 @@ export default function CheckoutClient({
                                             onChange={e => {
                                                 setAddress(a => ({
                                                     ...a,
-                                                    countryArea: e.target.value.toUpperCase(),
+                                                    countryArea: e.target.value,
                                                 }));
                                                 setTaxReady(false);
                                             }}
                                             className="w-full bg-transparent outline-none text-sm"
-                                            placeholder="TX"
+                                            placeholder="Texas"
                                         />
                                     </FormField>
 
@@ -668,12 +671,7 @@ export default function CheckoutClient({
                         </div>
                     )}
                 </div>
-
-
-
-
             </div>
-
         </main>
     );
 }

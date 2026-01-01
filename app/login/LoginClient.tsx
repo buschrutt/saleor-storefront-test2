@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { saleorFetch } from '@/lib/saleor'
 import { useSearchParams, useRouter } from 'next/navigation'
 
@@ -28,7 +28,7 @@ function ToastContainer({
                 <div
                     key={toast.id}
                     className={`relative px-5 py-4 pr-10 rounded-md text-sm
-            ${
+                    ${
                         toast.type === 'error'
                             ? 'bg-red-600 text-red-50'
                             : toast.type === 'success'
@@ -94,7 +94,6 @@ function LoginForm({
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [recoveryEmail, setRecoveryEmail] = useState('')
-
     const [loadingSignIn, setLoadingSignIn] = useState(false)
     const [loadingRecover, setLoadingRecover] = useState(false)
 
@@ -134,16 +133,16 @@ function LoginForm({
         try {
             const result = await saleorFetch(
                 `
-        mutation RequestPasswordReset($email: String!, $redirectUrl: String!) {
-          requestPasswordReset(email: $email, redirectUrl: $redirectUrl) {
-            errors { message }
-          }
-        }
-        `,
+                mutation RequestPasswordReset($email: String!, $redirectUrl: String!) {
+                  requestPasswordReset(email: $email, redirectUrl: $redirectUrl) {
+                    errors { message }
+                  }
+                }
+                `,
                 {
                     variables: {
                         email: recoveryEmail,
-                        redirectUrl: 'https://pacificmule.com/login',
+                        redirectUrl: 'https://pacificmule.com/password-reset',
                     },
                 }
             )
@@ -177,7 +176,11 @@ function LoginForm({
                 onChange={setPassword}
             />
 
-            <button onClick={signIn} disabled={loadingSignIn} className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition">
+            <button
+                onClick={signIn}
+                disabled={loadingSignIn}
+                className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
+            >
                 {loadingSignIn ? 'Signing In…' : 'Sign In'}
             </button>
 
@@ -188,7 +191,11 @@ function LoginForm({
                 onChange={setRecoveryEmail}
             />
 
-            <button onClick={recover} disabled={loadingRecover} className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition">
+            <button
+                onClick={recover}
+                disabled={loadingRecover}
+                className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
+            >
                 {loadingRecover ? 'Recovering…' : 'Recover'}
             </button>
         </div>
@@ -221,32 +228,27 @@ function RegisterForm({
         try {
             const result = await saleorFetch(
                 `
-        mutation Register(
-          $email: String!
-          $password: String!
-          $firstName: String!
-          $lastName: String!
-        ) {
-          accountRegister(
-            input: {
-              email: $email
-              password: $password
-              firstName: $firstName
-              lastName: $lastName
-              redirectUrl: "https://pacificmule.com/login"
-            }
-          ) {
-            errors { message }
-          }
-        }
-        `,
+                mutation Register(
+                  $email: String!
+                  $password: String!
+                  $firstName: String!
+                  $lastName: String!
+                ) {
+                  accountRegister(
+                    input: {
+                      email: $email
+                      password: $password
+                      firstName: $firstName
+                      lastName: $lastName
+                      redirectUrl: "https://pacificmule.com/login"
+                    }
+                  ) {
+                    errors { message }
+                  }
+                }
+                `,
                 { variables: { email, password, firstName, lastName } }
             )
-
-            if (result?.errors?.length) {
-                pushToast('error', result.errors[0].message)
-                return
-            }
 
             const errors = result?.data?.accountRegister?.errors ?? []
             if (errors.length) {
@@ -256,7 +258,7 @@ function RegisterForm({
 
             pushToast(
                 'success',
-                'If this email is not registered, you will receive a confirmation email.'
+                'Check your email to confirm registration'
             )
 
             setEmail('')
@@ -289,7 +291,11 @@ function RegisterForm({
                 onChange={setPasswordConfirm}
             />
 
-            <button onClick={submit} disabled={loading} className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition">
+            <button
+                onClick={submit}
+                disabled={loading}
+                className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
+            >
                 {loading ? 'Signing Up…' : 'Sign Up'}
             </button>
         </div>
@@ -303,98 +309,72 @@ export default function LoginClient() {
     const [toasts, setToasts] = useState<Toast[]>([])
     const params = useSearchParams()
     const router = useRouter()
-    const [isProcessing, setIsProcessing] = useState(false)
-    const [hasProcessedToken, setHasProcessedToken] = useState(false)
+
+    const processedRef = useRef(false)
 
     function pushToast(type: ToastType, message: string) {
         const id = Date.now()
         setToasts((t) => [...t, { id, type, message }])
-        setTimeout(() => {
-            setToasts((t) => t.filter((toast) => toast.id !== id))
-        }, 4000)
+        setTimeout(
+            () => setToasts((t) => t.filter((toast) => toast.id !== id)),
+            4000
+        )
     }
 
     function closeToast(id: number) {
         setToasts((t) => t.filter((toast) => toast.id !== id))
     }
 
+    /* =========================
+       Email confirmation ONLY
+       ========================= */
     useEffect(() => {
         const email = params.get('email')
         const token = params.get('token')
 
-        // Проверяем, есть ли параметр operation для определения типа операции
-        const operation = params.get('operation')
+        if (!email || !token) return
+        if (processedRef.current) return
 
-        // Если уже обрабатываем токен или нет параметров, или уже обработали токен
-        if (isProcessing || !email || !token || hasProcessedToken) return
+        // ⛔️ reset-токены здесь не трогаем
+        if (window.location.pathname !== '/login') return
 
-        const processToken = async () => {
-            setIsProcessing(true)
+        processedRef.current = true
 
-            // Определяем тип токена:
-            // 1. Если есть параметр operation и он равен 'password-reset' - это сброс пароля
-            // 2. Или если URL содержит '/password-reset' в пути
-            // 3. Иначе считаем, что это подтверждение регистрации
-            const isPasswordReset = operation === 'password-reset' ||
-                window.location.pathname.includes('password-reset')
-
+        ;(async () => {
             try {
-                if (isPasswordReset) {
-                    // Перенаправляем на страницу сброса пароля
-                    router.replace(
-                        `/password-reset?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
-                    )
-                    setHasProcessedToken(true)
-                } else {
-                    // Пытаемся подтвердить регистрацию
-                    const result = await saleorFetch(
-                        `
-          mutation ConfirmAccount($email: String!, $token: String!) {
-            confirmAccount(email: $email, token: $token) {
-              errors { message }
-            }
-          }
-          `,
-                        { variables: { email, token } }
-                    )
-
-                    if (result?.data?.confirmAccount?.errors?.length) {
-                        // Если не удалось подтвердить регистрацию, возможно это токен сброса пароля
-                        // направляем на страницу сброса пароля
-                        router.replace(
-                            `/password-reset?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
-                        )
-                    } else {
-                        pushToast('success', 'Email successfully confirmed')
-                        // Удаляем параметры из URL без перезагрузки страницы
-                        router.replace('/login')
+                const result = await saleorFetch(
+                    `
+                    mutation ConfirmAccount($email: String!, $token: String!) {
+                      confirmAccount(email: $email, token: $token) {
+                        errors { message }
+                      }
                     }
-                    setHasProcessedToken(true)
+                    `,
+                    { variables: { email, token } }
+                )
+
+                if (result?.data?.confirmAccount?.errors?.length) {
+                    pushToast(
+                        'error',
+                        result.data.confirmAccount.errors[0].message
+                    )
+                } else {
+                    pushToast('success', 'Email successfully confirmed')
                 }
-            } catch (error) {
-                console.error('Token processing error:', error)
-                pushToast('error', 'Token processing failed. Please try again.')
-                setHasProcessedToken(true)
+
                 router.replace('/login')
-            } finally {
-                setIsProcessing(false)
+            } catch {
+                pushToast('error', 'Confirmation failed')
+                router.replace('/login')
             }
-        }
-
-        // Используем IIFE для обработки promise
-        (async () => {
-            await processToken()
-        })().catch(error => {
-            console.error('Unhandled error in processToken:', error)
-            setIsProcessing(false)
-        })
-
-    }, [params, router, isProcessing, hasProcessedToken])
+        })()
+    }, [params, router])
 
     return (
         <main className="min-h-screen bg-gray-100 relative">
             <ToastContainer toasts={toasts} onClose={closeToast} />
 
+            {/* ⬅️ НАВИГАЦИЯ ОСТАЁТСЯ */}
             <div className="absolute top-6 left-6 flex flex-col gap-3">
                 <button
                     onClick={() => router.push('/')}
