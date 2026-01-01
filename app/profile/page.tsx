@@ -67,7 +67,9 @@ function isAuthError(error: unknown): boolean {
     return message.includes('401') ||
         message.includes('403') ||
         message.includes('unauthorized') ||
-        message.includes('forbidden');
+        message.includes('forbidden') ||
+        message.includes('no user data') ||
+        message.includes('user not found');
 }
 
 /* =========================
@@ -105,7 +107,8 @@ export default function ProfilePage() {
        Check authentication and load profile
        ========================= */
     useEffect(() => {
-        async function checkAuthAndLoadProfile() {
+        // Используем IIFE для асинхронного эффекта
+        (async () => {
             setLoading(true);
             setError(null);
 
@@ -116,34 +119,67 @@ export default function ProfilePage() {
 
                 console.log('Profile load response:', profileRes.status);
 
+                // Проверяем статусы авторизации
                 if (profileRes.status === 401 || profileRes.status === 403) {
-                    // Not authenticated, redirect to log
                     setIsAuthenticated(false);
                     router.replace('/login');
                     return;
                 }
 
+                // Если ответ не OK, обрабатываем ошибку на месте
                 if (!profileRes.ok) {
-                    const errorText = await profileRes.text();
-                    throw new Error(`Failed to load profile: ${errorText}`);
+                    let errorText = '';
+                    try {
+                        errorText = await profileRes.text();
+                    } catch {
+                        errorText = `HTTP ${profileRes.status}`;
+                    }
+
+                    console.error(`Failed to load profile: ${errorText}`);
+
+                    // Для ошибок сервера показываем сообщение
+                    setError(`Server error: ${errorText}`);
+                    return;
                 }
 
-                const profileData = await profileRes.json();
+                // Пытаемся распарсить JSON
+                let profileData;
+                try {
+                    profileData = await profileRes.json();
+                } catch (parseError) {
+                    console.error('Failed to parse profile response:', parseError);
+                    setError('Invalid response from server');
+                    return;
+                }
+
                 console.log('Profile data:', profileData);
 
                 const me = profileData.me;
 
-                if (!me) {
-                    throw new Error('No user data received');
+                // Проверяем наличие данных пользователя
+                if (!me || typeof me !== 'object') {
+                    console.warn('No user data in response:', profileData);
+                    setIsAuthenticated(false);
+                    router.replace('/login');
+                    return;
                 }
 
+                // Проверяем наличие email как минимальный признак валидного пользователя
+                if (!me.email) {
+                    console.warn('User data missing email:', me);
+                    setIsAuthenticated(false);
+                    router.replace('/login');
+                    return;
+                }
+
+                // Если все проверки пройдены - пользователь аутентифицирован
                 setIsAuthenticated(true);
-                setEmail(me.email);
+                setEmail(me.email || '');
                 setFirstName(me.firstName ?? '');
                 setLastName(me.lastName ?? '');
 
                 const a = me.defaultShippingAddress;
-                if (a) {
+                if (a && typeof a === 'object') {
                     setStreet1(a.streetAddress1 ?? '');
                     setStreet2(a.streetAddress2 ?? '');
                     setCity(a.city ?? '');
@@ -152,8 +188,10 @@ export default function ProfilePage() {
                     setCountry(a.country?.code ?? 'US');
                 }
             } catch (err) {
-                console.error('Load profile error:', err);
+                // Этот блок catch теперь ловит только сетевые ошибки или ошибки выполнения fetch
+                console.error('Network or execution error:', err);
 
+                // Проверяем, не связана ли ошибка с авторизацией
                 if (isAuthError(err)) {
                     setIsAuthenticated(false);
                     router.replace('/login');
@@ -163,9 +201,7 @@ export default function ProfilePage() {
             } finally {
                 setLoading(false);
             }
-        }
-
-        checkAuthAndLoadProfile();
+        })(); // Вызываем асинхронную функцию немедленно
     }, [router]);
 
     /* =========================
@@ -236,7 +272,9 @@ export default function ProfilePage() {
 
             console.log('Update response status:', res.status);
 
+            // Проверяем авторизацию при обновлении
             if (res.status === 401 || res.status === 403) {
+                setIsAuthenticated(false);
                 router.replace('/login');
                 return;
             }
@@ -263,7 +301,14 @@ export default function ProfilePage() {
 
         } catch (err) {
             console.error('Update error:', err);
-            setError(getErrorMessage(err));
+
+            // Проверяем, не связана ли ошибка с авторизацией
+            if (isAuthError(err)) {
+                setIsAuthenticated(false);
+                router.replace('/login');
+            } else {
+                setError(getErrorMessage(err));
+            }
         }
     }
 
@@ -275,6 +320,7 @@ export default function ProfilePage() {
             });
 
             if (profileRes.status === 401 || profileRes.status === 403) {
+                setIsAuthenticated(false);
                 router.replace('/login');
                 return;
             }
@@ -285,6 +331,13 @@ export default function ProfilePage() {
 
             const profileData = await profileRes.json();
             const me = profileData.me;
+
+            // Проверяем наличие пользователя
+            if (!me) {
+                setIsAuthenticated(false);
+                router.replace('/login');
+                return;
+            }
 
             setEmail(me.email);
             setFirstName(me.firstName ?? '');
@@ -302,6 +355,7 @@ export default function ProfilePage() {
         } catch (err) {
             console.error('Load profile error:', err);
             if (isAuthError(err)) {
+                setIsAuthenticated(false);
                 router.replace('/login');
             }
         }
@@ -317,6 +371,7 @@ export default function ProfilePage() {
     }
 
     if (isAuthenticated === false) {
+        // Можно показать короткое сообщение перед редиректом
         return (
             <div className="p-8 text-sm uppercase tracking-wide text-gray-500">
                 Redirecting to login…
@@ -324,8 +379,9 @@ export default function ProfilePage() {
         );
     }
 
+    // Если пользователь не аутентифицирован, но еще не было редиректа
     if (!isAuthenticated) {
-        return null; // or a loading spinner while redirecting
+        return null; // или можно вернуть компонент загрузки
     }
 
     return (
@@ -349,8 +405,11 @@ export default function ProfilePage() {
 
                 <button
                     onClick={async () => {
-                        await fetch('/api/logout', { method: 'POST' });
-                        router.replace('/login');
+                        try {
+                            await fetch('/api/logout', { method: 'POST' });
+                        } finally {
+                            router.replace('/login');
+                        }
                     }}
                     className="bg-[#2B3A4A] text-white px-4 py-3 uppercase text-sm tracking-wide rounded-sm hover:bg-[#111a2e] transition"
                 >
@@ -359,11 +418,6 @@ export default function ProfilePage() {
             </div>
 
             <div className="max-w-xl mx-auto pt-24 px-4 space-y-10">
-
-                <h1 className="text-sm uppercase tracking-wide text-gray-700">
-                    Profile · {email}
-                </h1>
-
                 {error && (
                     <div className="bg-red-100 text-red-700 text-sm p-3 rounded">
                         {error}
@@ -375,6 +429,10 @@ export default function ProfilePage() {
                         Profile updated successfully!
                     </div>
                 )}
+
+                <h1 className="text-sm uppercase tracking-wide text-gray-700">
+                    Profile · {email}
+                </h1>
 
                 {/* PROFILE */}
                 <section className="space-y-6">

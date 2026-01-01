@@ -303,6 +303,8 @@ export default function LoginClient() {
     const [toasts, setToasts] = useState<Toast[]>([])
     const params = useSearchParams()
     const router = useRouter()
+    const [isProcessing, setIsProcessing] = useState(false)
+    const [hasProcessedToken, setHasProcessedToken] = useState(false)
 
     function pushToast(type: ToastType, message: string) {
         const id = Date.now()
@@ -320,39 +322,74 @@ export default function LoginClient() {
         const email = params.get('email')
         const token = params.get('token')
 
-        if (email && token && window.location.search.includes('token')) {
-            router.replace(
-                `/password-reset?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
-            )
-            return
-        }
+        // Проверяем, есть ли параметр operation для определения типа операции
+        const operation = params.get('operation')
 
-        if (email && token) {
-            ;(async () => {
-                const result = await saleorFetch(
-                    `
+        // Если уже обрабатываем токен или нет параметров, или уже обработали токен
+        if (isProcessing || !email || !token || hasProcessedToken) return
+
+        const processToken = async () => {
+            setIsProcessing(true)
+
+            // Определяем тип токена:
+            // 1. Если есть параметр operation и он равен 'password-reset' - это сброс пароля
+            // 2. Или если URL содержит '/password-reset' в пути
+            // 3. Иначе считаем, что это подтверждение регистрации
+            const isPasswordReset = operation === 'password-reset' ||
+                window.location.pathname.includes('password-reset')
+
+            try {
+                if (isPasswordReset) {
+                    // Перенаправляем на страницу сброса пароля
+                    router.replace(
+                        `/password-reset?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
+                    )
+                    setHasProcessedToken(true)
+                } else {
+                    // Пытаемся подтвердить регистрацию
+                    const result = await saleorFetch(
+                        `
           mutation ConfirmAccount($email: String!, $token: String!) {
             confirmAccount(email: $email, token: $token) {
               errors { message }
             }
           }
           `,
-                    { variables: { email, token } }
-                )
-
-                if (result?.data?.confirmAccount?.errors?.length) {
-                    pushToast(
-                        'error',
-                        result.data.confirmAccount.errors[0].message
+                        { variables: { email, token } }
                     )
-                } else {
-                    pushToast('success', 'Email successfully confirmed')
-                }
 
+                    if (result?.data?.confirmAccount?.errors?.length) {
+                        // Если не удалось подтвердить регистрацию, возможно это токен сброса пароля
+                        // направляем на страницу сброса пароля
+                        router.replace(
+                            `/password-reset?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`
+                        )
+                    } else {
+                        pushToast('success', 'Email successfully confirmed')
+                        // Удаляем параметры из URL без перезагрузки страницы
+                        router.replace('/login')
+                    }
+                    setHasProcessedToken(true)
+                }
+            } catch (error) {
+                console.error('Token processing error:', error)
+                pushToast('error', 'Token processing failed. Please try again.')
+                setHasProcessedToken(true)
                 router.replace('/login')
-            })()
+            } finally {
+                setIsProcessing(false)
+            }
         }
-    }, [params, router])
+
+        // Используем IIFE для обработки promise
+        (async () => {
+            await processToken()
+        })().catch(error => {
+            console.error('Unhandled error in processToken:', error)
+            setIsProcessing(false)
+        })
+
+    }, [params, router, isProcessing, hasProcessedToken])
 
     return (
         <main className="min-h-screen bg-gray-100 relative">
