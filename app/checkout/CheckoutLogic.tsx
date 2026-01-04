@@ -211,6 +211,7 @@ export function CheckoutLogic({
                                   setBilling,
                                   clientSecret,
                                   taxReady,
+                                  updatingTax,
                                   updateTaxFromAddress,
                               }: {
     user: User | null;
@@ -219,12 +220,21 @@ export function CheckoutLogic({
     setAddress: React.Dispatch<React.SetStateAction<Address>>;
     billing: Billing;
     setBilling: React.Dispatch<React.SetStateAction<Billing>>;
-    clientSecret: string;
+    clientSecret: string | null;
     taxReady: boolean;
+    updatingTax: boolean;
     updateTaxFromAddress: () => Promise<void>;
 }) {
     const router = useRouter();
-    const { toasts, closeToast } = useToast();
+    const { toasts, closeToast, pushToast } = useToast();
+    const [paymentOpen, setPaymentOpen] = React.useState(false);
+    const shippingValid =
+        Boolean(address.fullName.trim()) &&
+        Boolean(address.streetAddress1.trim()) &&
+        Boolean(address.city.trim()) &&
+        address.countryArea.trim().length >= 2 &&
+        /^\d{5}$/.test(address.postalCode.trim());
+    const shippingLocked = paymentOpen;
 
     if (!user) {
         return (
@@ -261,7 +271,10 @@ export function CheckoutLogic({
                         onChange={e =>
                             setAddress(a => ({ ...a, fullName: e.target.value }))
                         }
-                        className="w-full bg-transparent outline-none h-10 text-sm"
+                        disabled={shippingLocked}
+                        className={`w-full bg-transparent outline-none h-10 text-sm ${
+                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                     />
                 </FormField>
 
@@ -274,7 +287,10 @@ export function CheckoutLogic({
                                 streetAddress1: e.target.value,
                             }))
                         }
-                        className="w-full bg-transparent outline-none h-10 text-sm"
+                        disabled={shippingLocked}
+                        className={`w-full bg-transparent outline-none h-10 text-sm ${
+                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                     />
                 </FormField>
 
@@ -287,7 +303,10 @@ export function CheckoutLogic({
                                 streetAddress2: e.target.value,
                             }))
                         }
-                        className="w-full bg-transparent outline-none h-10 text-sm"
+                        disabled={shippingLocked}
+                        className={`w-full bg-transparent outline-none h-10 text-sm ${
+                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                         placeholder="Apartment, suite, unit, etc. (optional)"
                     />
                 </FormField>
@@ -298,7 +317,10 @@ export function CheckoutLogic({
                         onChange={e =>
                             setAddress(a => ({ ...a, city: e.target.value }))
                         }
-                        className="w-full bg-transparent outline-none h-10 text-sm"
+                        disabled={shippingLocked}
+                        className={`w-full bg-transparent outline-none h-10 text-sm ${
+                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                     />
                 </FormField>
 
@@ -311,8 +333,10 @@ export function CheckoutLogic({
                                 countryArea: e.target.value,
                             }))
                         }
-                        onBlur={updateTaxFromAddress}
-                        className="w-full bg-transparent outline-none h-10 text-sm"
+                        disabled={shippingLocked}
+                        className={`w-full bg-transparent outline-none h-10 text-sm ${
+                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                     />
                 </FormField>
 
@@ -325,21 +349,55 @@ export function CheckoutLogic({
                                 postalCode: e.target.value,
                             }))
                         }
-                        onBlur={updateTaxFromAddress}
-                        className="w-full bg-transparent outline-none h-10 text-sm"
+                        disabled={shippingLocked}
+                        className={`w-full bg-transparent outline-none h-10 text-sm ${
+                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                     />
                 </FormField>
             </section>
 
             {/* PAYMENT */}
-            <StripeProvider clientSecret={clientSecret}>
-                <PayForm
-                    clientSecret={clientSecret}
-                    billing={billing}
-                    setBilling={setBilling}
-                    taxReady={taxReady}
-                />
-            </StripeProvider>
+            {paymentOpen ? (
+                clientSecret ? (
+                    <StripeProvider clientSecret={clientSecret}>
+                        <PayForm
+                            clientSecret={clientSecret}
+                            billing={billing}
+                            setBilling={setBilling}
+                            taxReady={taxReady}
+                        />
+                    </StripeProvider>
+                ) : (
+                    <p className="text-sm text-gray-500">Preparing payment…</p>
+                )
+            ) : (
+                <button
+                    type="button"
+                    disabled={!shippingValid || updatingTax}
+                    onClick={async () => {
+                        if (!shippingValid) {
+                            pushToast('error', 'Please complete shipping address first');
+                            return;
+                        }
+
+                        // гарантируем пересчёт налога + обновление checkout
+                        await updateTaxFromAddress();
+
+                        // открываем оплату (поля shipping залочатся)
+                        setPaymentOpen(true);
+                    }}
+                    className={`mb-12 bg-[#2B3A4A] text-white px-4 py-3 text-sm uppercase rounded-sm transition
+      ${
+                        !shippingValid || updatingTax
+                            ? 'opacity-60 cursor-not-allowed'
+                            : 'hover:bg-[#111a2e]'
+                    }
+    `}
+                >
+                    {updatingTax ? 'Calculating tax…' : 'PAYMENT'}
+                </button>
+            )}
         </div>
     );
 }

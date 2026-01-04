@@ -134,22 +134,7 @@ export default function CheckoutClient({
             });
     }, []);
 
-    useEffect(() => {
-        if (!checkout) return;
-
-        fetch('/api/checkout/complete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                amount: checkout.totalPrice.gross.amount,
-                currency: checkout.totalPrice.gross.currency,
-            }),
-        })
-            .then(r => r.json())
-            .then(d => setClientSecret(d.clientSecret));
-    }, [checkout]);
-
-    if (!checkout || !clientSecret) {
+    if (!checkout) {
         return (
             <main className="min-h-screen flex items-center justify-center">
                 <p className="text-sm text-gray-600">Loading checkout…</p>
@@ -266,8 +251,9 @@ export default function CheckoutClient({
                     setAddress={setAddress}
                     billing={billing}
                     setBilling={setBilling}
-                    clientSecret={clientSecret}
+                    clientSecret={clientSecret} // !!!! CHECK OUT
                     taxReady={taxReady}
+                    updatingTax={updatingTax}
                     updateTaxFromAddress={updateTaxFromAddress}
                 />
             </div>
