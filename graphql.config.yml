@@ -1,6 +1,0 @@
-schema:
-  - https://buschrutt-saleor-api.fly.dev/graphql/:
-      headers:
-        Authorization: "Bearer 8YzRwiVioNgpyMGxnfHUSfFzaalTq2"
-
-documents: src/graphql/**/*.graphql
