@@ -30,19 +30,30 @@ type Checkout = {
 function FormField({
                        label,
                        children,
+                       className = "",
+                       disabled = false,
                    }: {
-    label: string;
-    children: React.ReactNode;
+    label: string
+    children: React.ReactNode
+    className?: string
+    disabled?: boolean
 }) {
     return (
-        <fieldset className="w-full border border-gray-300 px-3 pb-3 pt-1 rounded-md">
-            <legend className="px-1 text-xs tracking-wide text-gray-600">
+        <fieldset
+            className={`relative w-full border border-gray-300 px-3 pb-3 pt-1 rounded-md
+            ${disabled ? 'opacity-60 pointer-events-none' : ''}
+            ${className}`}
+        >
+            <legend className="px-1 text-xs tracking-wide text-gray-600 pointer-events-none">
                 {label}
             </legend>
-            <div className="pt-1 w-full">{children}</div>
+            <div className="pt-1 w-full relative z-10">
+                {children}
+            </div>
         </fieldset>
-    );
+    )
 }
+
 
 const CARD_STYLE = {
     style: {
@@ -52,22 +63,18 @@ const CARD_STYLE = {
             color: '#0f172a',
             '::placeholder': {
                 color: '#9ca3af',
+                fontSize: '14px'
             },
+            lineHeight: '40px', // Важно: задаем высоту строки
         },
         invalid: {
-            color: '#dc2626',
+            color: '#dc2626'
         },
-    },
-    classes: {
-        base: 'w-full h-10 py-3',
-        focus: 'outline-none',
-        empty: '',
-        invalid: '',
     },
 };
 
 /* =========================
-   Payment form
+   Payment form (INSIDE Elements)
    ========================= */
 
 function PayForm({
@@ -88,13 +95,15 @@ function PayForm({
     const [paying, setPaying] = React.useState(false);
 
     async function pay() {
+        if (!stripe || !elements) return;
+
         if (!billing.firstName || !billing.lastName) {
-            pushToast('error', 'Please enter billing first and last name');
+            pushToast('error', 'Enter billing name');
             return;
         }
-        if (!stripe || !elements) return;
+
         if (!taxReady) {
-            pushToast('error', 'Please enter shipping address');
+            pushToast('error', 'Shipping address required');
             return;
         }
 
@@ -104,7 +113,7 @@ function PayForm({
             payment_method: {
                 card: elements.getElement(CardNumberElement)!,
                 billing_details: {
-                    name: `${billing.firstName} ${billing.lastName}`.trim(),
+                    name: `${billing.firstName} ${billing.lastName}`,
                     address: {
                         postal_code: billing.postalCode,
                         state: billing.state,
@@ -125,72 +134,67 @@ function PayForm({
 
     return (
         <section className="pt-12 pb-12 border-t border-gray-200 space-y-6">
-            {/* BILLING (for Stripe) */}
             <h2 className="text-sm uppercase tracking-wide text-gray-700">
                 Payment Details
             </h2>
-            {/* BILLING NAME */}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <FormField label="First Name">
                     <input
                         value={billing.firstName}
-                        onChange={(e) =>
+                        onChange={e =>
                             setBilling(b => ({ ...b, firstName: e.target.value }))
                         }
                         className="w-full bg-transparent outline-none h-10 text-sm"
-                        placeholder="John"
                     />
                 </FormField>
 
                 <FormField label="Last Name">
                     <input
                         value={billing.lastName}
-                        onChange={(e) =>
+                        onChange={e =>
                             setBilling(b => ({ ...b, lastName: e.target.value }))
                         }
                         className="w-full bg-transparent outline-none h-10 text-sm"
-                        placeholder="Doe"
                     />
                 </FormField>
             </div>
-            <div className="pt-2 space-y-6">
-                <FormField label="Billing ZIP Code">
-                    <input
-                        value={billing.postalCode}
-                        onChange={(e) =>
-                            setBilling((b) => ({ ...b, postalCode: e.target.value }))
-                        }
-                        className="w-full bg-transparent outline-none h-10 text-sm"
-                        placeholder="78717"
-                    />
-                </FormField>
 
-                <FormField label="Billing State">
-                    <input
-                        value={billing.state}
-                        onChange={(e) =>
-                            setBilling((b) => ({ ...b, state: e.target.value }))
-                        }
-                        className="w-full bg-transparent outline-none h-10 text-sm"
-                        placeholder="TX"
-                    />
-                </FormField>
-            </div>
+            <FormField label="Billing State">
+                <input
+                    value={billing.state}
+                    onChange={e =>
+                        setBilling(b => ({ ...b, state: e.target.value }))
+                    }
+                    className="w-full bg-transparent outline-none h-10 text-sm"
+                />
+            </FormField>
+
+            <FormField label="Billing ZIP">
+                <input
+                    value={billing.postalCode}
+                    onChange={e =>
+                        setBilling(b => ({ ...b, postalCode: e.target.value }))
+                    }
+                    className="w-full bg-transparent outline-none h-10 text-sm"
+                />
+            </FormField>
+
             <FormField label="Card Number">
-                <CardNumberElement options={CARD_STYLE} />
-            </FormField>
-            <FormField label="MM / YY">
-                <CardExpiryElement options={CARD_STYLE} />
-            </FormField>
-            <FormField label="CVC">
-                <CardCvcElement options={CARD_STYLE} />
+                    <CardNumberElement options={CARD_STYLE} />
             </FormField>
 
+            <FormField label="MM / YY">
+                    <CardExpiryElement options={CARD_STYLE} />
+            </FormField>
+
+            <FormField label="CVC">
+                    <CardCvcElement options={CARD_STYLE} />
+            </FormField>
 
             <button
-                type="button"
                 onClick={pay}
-                disabled={!stripe || paying || !taxReady}
+                disabled={!stripe || paying}
                 className="bg-[#2B3A4A] text-white px-4 py-3 text-sm uppercase rounded-sm"
             >
                 {paying ? 'Processing…' : 'Pay'}
@@ -200,7 +204,7 @@ function PayForm({
 }
 
 /* =========================
-   CheckoutLogic (RIGHT)
+   CheckoutLogic (RIGHT COLUMN)
    ========================= */
 
 export function CheckoutLogic({
@@ -220,7 +224,7 @@ export function CheckoutLogic({
     setAddress: React.Dispatch<React.SetStateAction<Address>>;
     billing: Billing;
     setBilling: React.Dispatch<React.SetStateAction<Billing>>;
-    clientSecret: string | null;
+    clientSecret?: string;
     taxReady: boolean;
     updatingTax: boolean;
     updateTaxFromAddress: () => Promise<void>;
@@ -228,20 +232,18 @@ export function CheckoutLogic({
     const router = useRouter();
     const { toasts, closeToast, pushToast } = useToast();
     const [paymentOpen, setPaymentOpen] = React.useState(false);
+
     const shippingValid =
-        Boolean(address.fullName.trim()) &&
-        Boolean(address.streetAddress1.trim()) &&
-        Boolean(address.city.trim()) &&
+        address.fullName.trim() &&
+        address.streetAddress1.trim() &&
+        address.city.trim() &&
         address.countryArea.trim().length >= 2 &&
         /^\d{5}$/.test(address.postalCode.trim());
-    const shippingLocked = paymentOpen;
 
     if (!user) {
         return (
             <section>
-                <p className="text-sm text-gray-700">
-                    Please sign in to continue checkout
-                </p>
+                <p className="text-sm">Please sign in to continue</p>
                 <button
                     onClick={() => router.push('/login')}
                     className="bg-[#2B3A4A] text-white px-4 py-3 mt-4 text-sm uppercase"
@@ -256,147 +258,105 @@ export function CheckoutLogic({
         <div className="space-y-16">
             <ToastContainer toasts={toasts} onClose={closeToast} />
 
-            <section className="text-sm">
-                <strong>{user.email}</strong>
-            </section>
-
             {/* SHIPPING */}
             <section className="space-y-6">
                 <h2 className="text-sm uppercase tracking-wide text-gray-700">
                     Shipping Address
                 </h2>
-                <FormField label="Full Name">
+
+                <FormField label="Full Name" disabled={paymentOpen}>
                     <input
                         value={address.fullName}
                         onChange={e =>
                             setAddress(a => ({ ...a, fullName: e.target.value }))
                         }
-                        disabled={shippingLocked}
-                        className={`w-full bg-transparent outline-none h-10 text-sm ${
-                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
-                        }`}
+                        className="w-full bg-transparent outline-none h-10 text-sm"
                     />
                 </FormField>
 
-                <FormField label="Street">
+                <FormField label="Street" disabled={paymentOpen}>
                     <input
                         value={address.streetAddress1}
                         onChange={e =>
-                            setAddress(a => ({
-                                ...a,
-                                streetAddress1: e.target.value,
-                            }))
+                            setAddress(a => ({ ...a, streetAddress1: e.target.value }))
                         }
-                        disabled={shippingLocked}
-                        className={`w-full bg-transparent outline-none h-10 text-sm ${
-                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
-                        }`}
+                        className="w-full bg-transparent outline-none h-10 text-sm"
                     />
                 </FormField>
 
-                <FormField label="Street Line 2 (Apt, Suite, Unit)">
+                <FormField label="Street Line 2 (Apt, Suite, Unit)" disabled={paymentOpen}>
                     <input
-                        value={address.streetAddress2}
+                        value={address.streetAddress2 ?? ''}
                         onChange={e =>
                             setAddress(a => ({
                                 ...a,
                                 streetAddress2: e.target.value,
                             }))
                         }
-                        disabled={shippingLocked}
-                        className={`w-full bg-transparent outline-none h-10 text-sm ${
-                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
-                        }`}
+                        className="w-full bg-transparent outline-none h-10 text-sm"
                         placeholder="Apartment, suite, unit, etc. (optional)"
                     />
                 </FormField>
 
-                <FormField label="City">
+                <FormField label="City" disabled={paymentOpen}>
                     <input
                         value={address.city}
                         onChange={e =>
                             setAddress(a => ({ ...a, city: e.target.value }))
                         }
-                        disabled={shippingLocked}
-                        className={`w-full bg-transparent outline-none h-10 text-sm ${
-                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
-                        }`}
+                        className="w-full bg-transparent outline-none h-10 text-sm"
                     />
                 </FormField>
 
-                <FormField label="State">
+                <FormField label="State" disabled={paymentOpen}>
                     <input
                         value={address.countryArea}
                         onChange={e =>
-                            setAddress(a => ({
-                                ...a,
-                                countryArea: e.target.value,
-                            }))
+                            setAddress(a => ({ ...a, countryArea: e.target.value }))
                         }
-                        disabled={shippingLocked}
-                        className={`w-full bg-transparent outline-none h-10 text-sm ${
-                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
-                        }`}
+                        className="w-full bg-transparent outline-none h-10 text-sm"
                     />
                 </FormField>
 
-                <FormField label="ZIP">
+                <FormField label="ZIP" disabled={paymentOpen}>
                     <input
                         value={address.postalCode}
                         onChange={e =>
-                            setAddress(a => ({
-                                ...a,
-                                postalCode: e.target.value,
-                            }))
+                            setAddress(a => ({ ...a, postalCode: e.target.value }))
                         }
-                        disabled={shippingLocked}
-                        className={`w-full bg-transparent outline-none h-10 text-sm ${
-                            shippingLocked ? 'opacity-60 cursor-not-allowed' : ''
-                        }`}
+                        className="w-full bg-transparent outline-none h-10 text-sm"
                     />
                 </FormField>
             </section>
 
             {/* PAYMENT */}
-            {paymentOpen ? (
-                clientSecret ? (
-                    <StripeProvider clientSecret={clientSecret}>
-                        <PayForm
-                            clientSecret={clientSecret}
-                            billing={billing}
-                            setBilling={setBilling}
-                            taxReady={taxReady}
-                        />
-                    </StripeProvider>
-                ) : (
-                    <p className="text-sm text-gray-500">Preparing payment…</p>
-                )
-            ) : (
+            {!paymentOpen ? (
                 <button
-                    type="button"
-                    disabled={!shippingValid || updatingTax}
+                    disabled={!shippingValid || updatingTax || paymentOpen}
                     onClick={async () => {
                         if (!shippingValid) {
-                            pushToast('error', 'Please complete shipping address first');
+                            pushToast('error', 'Complete shipping address');
                             return;
                         }
 
-                        // гарантируем пересчёт налога + обновление checkout
                         await updateTaxFromAddress();
-
-                        // открываем оплату (поля shipping залочатся)
                         setPaymentOpen(true);
                     }}
-                    className={`mb-12 bg-[#2B3A4A] text-white px-4 py-3 text-sm uppercase rounded-sm transition
-      ${
-                        !shippingValid || updatingTax
-                            ? 'opacity-60 cursor-not-allowed'
-                            : 'hover:bg-[#111a2e]'
-                    }
-    `}
+                    className="bg-[#2B3A4A] text-white px-4 py-3 text-sm uppercase rounded-sm mb-12"
                 >
                     {updatingTax ? 'Calculating tax…' : 'PAYMENT'}
                 </button>
+            ) : !clientSecret ? (
+                <p className="text-sm text-gray-500">Preparing payment…</p>
+            ) : (
+                <StripeProvider clientSecret={clientSecret}>
+                    <PayForm
+                        clientSecret={clientSecret}
+                        billing={billing}
+                        setBilling={setBilling}
+                        taxReady={taxReady}
+                    />
+                </StripeProvider>
             )}
         </div>
     );

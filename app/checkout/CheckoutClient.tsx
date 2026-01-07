@@ -1,54 +1,56 @@
-'use client';
+'use client'
 
-import { CheckoutSummary } from './CheckoutSummary';
-import type { Billing, Address} from '@/types/checkout';
-import { CheckoutLogic } from './CheckoutLogic';
-import { useToast } from '@/app/components/useToast';
-import ToastContainer from '@/app/components/ToastContainer';
-import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { CheckoutSummary } from './CheckoutSummary'
+import { CheckoutLogic } from './CheckoutLogic'
+import type { Billing, Address } from '@/types/checkout'
+import { useToast } from '@/app/components/useToast'
+import ToastContainer from '@/app/components/ToastContainer'
 
 /* =========================
    Types
    ========================= */
 
 type CheckoutUser = {
-    email: string;
-};
+    email: string
+}
 
 type Money = {
-    amount: number;
-    currency: string;
-};
-
-type CheckoutLine = {
-    quantity: number;
-    variant: {
-        product: {
-            name: string;
-            description?: string; // HTML
-        };
-    };
-};
+    amount: number
+    currency: string
+}
 
 type Checkout = {
-    id: string;
-    user?: CheckoutUser | null;
-    shippingAddress?: Address | null;
-    lines: CheckoutLine[];
-    subtotalPrice: {
-        net: { amount: number };
-    };
-    totalPrice: {
-        net: { amount: number };
-        gross: Money;
-    };
-};
+    id: string
+    user?: CheckoutUser | null
+    shippingAddress?: Address | null
+    totalPrice?: {
+        net?: { amount: number }
+        gross?: Money
+    }
+}
 
 type CheckoutImage = {
-    imageUrl: string;
-    alt?: string;
-} | null;
+    imageUrl: string
+    alt?: string
+} | null
+
+type LeftColumn = {
+    product: {
+        name: string
+        description: string | null
+    }
+    quantity: number
+    image: {
+        url: string
+        alt: string | null
+    } | null
+    basePrice: {
+        net: number
+        currency: string
+    }
+}
 
 /* =========================
    Page
@@ -57,16 +59,21 @@ type CheckoutImage = {
 export default function CheckoutClient({
                                            checkoutImage,
                                        }: {
-    checkoutImage: CheckoutImage;
+    checkoutImage: CheckoutImage
 }) {
-    const { toasts, pushToast, closeToast } = useToast();
-    const router = useRouter();
-    const [user, setUser] = useState<{ email: string } | null>(null);
-    const isAuthenticated = Boolean(user);
-    const [checkout, setCheckout] = useState<Checkout | null>(null);
-    const [clientSecret, setClientSecret] = useState<string | null>(null);
-    const [taxReady, setTaxReady] = useState(false);
-    const [updatingTax, setUpdatingTax] = useState(false);
+    const router = useRouter()
+    const { toasts, pushToast, closeToast } = useToast()
+
+    /* =========================
+       State
+       ========================= */
+    const [user, setUser] = useState<{ email: string } | null>(null)
+    const [checkout, setCheckout] = useState<Checkout | null>(null)
+    const [leftColumn, setLeftColumn] = useState<LeftColumn | null>(null)
+
+    const [clientSecret, setClientSecret] = useState<string>()
+    const [taxReady, setTaxReady] = useState(false)
+    const [updatingTax, setUpdatingTax] = useState(false)
 
     const [address, setAddress] = useState<Address>({
         fullName: '',
@@ -76,7 +83,7 @@ export default function CheckoutClient({
         countryArea: '',
         postalCode: '',
         country: 'US',
-    });
+    })
 
     const [billing, setBilling] = useState<Billing>({
         firstName: '',
@@ -84,93 +91,103 @@ export default function CheckoutClient({
         postalCode: '',
         state: '',
         country: 'US',
-    });
+    })
 
+    /* =========================
+       Load LEFT column (static product data)
+       ========================= */
+    useEffect(() => {
+        fetch('/api/checkout/leftColumn')
+            .then(r => r.json())
+            .then(setLeftColumn)
+            .catch(console.error)
+    }, [])
+
+    /* =========================
+       Load user (optional)
+       ========================= */
     useEffect(() => {
         fetch('/api/me')
             .then(r => r.json())
             .then(data => setUser(data.user))
-            .catch(() => setUser(null));
-    }, []);
+            .catch(() => setUser(null))
+    }, [])
 
+    /* =========================
+       Create checkout
+       ========================= */
     useEffect(() => {
-        if (!checkout || !taxReady) return;
+        fetch('/api/checkout/create', { method: 'POST' })
+            .then(r => r.json())
+            .then(setCheckout)
+            .catch(console.error)
+    }, [])
+
+    /* =========================
+       CREATE PAYMENT INTENT
+       =========================
+    */
+    useEffect(() => {
+        if (!taxReady) return
+        if (!checkout?.totalPrice?.gross) return
+        if (clientSecret) return //
 
         fetch('/api/checkout/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 amount: checkout.totalPrice.gross.amount,
-                currency: checkout.totalPrice.gross.currency,
+                currency: checkout.totalPrice.gross.currency.toLowerCase(),
             }),
         })
             .then(r => r.json())
-            .then(d => setClientSecret(d.clientSecret));
-    }, [checkout, taxReady]);
+            .then(d => setClientSecret(d.clientSecret))
+            .catch(() =>
+                pushToast('error', 'Failed to prepare payment')
+            )
+    }, [taxReady, checkout, pushToast])
 
+    /* =========================
+       Safe totals
+       ========================= */
+    const totalNet =
+        checkout?.totalPrice?.net?.amount ??
+        leftColumn?.basePrice.net ??
+        0
 
-    useEffect(() => {
-        if (!checkout?.shippingAddress || !isAuthenticated) return;
+    const totalGross =
+        checkout?.totalPrice?.gross?.amount ??
+        totalNet
 
-        setAddress(a => ({
-            ...a,
-            fullName: checkout.shippingAddress!.fullName || '',
-            streetAddress1: checkout.shippingAddress!.streetAddress1 || '',
-            streetAddress2: checkout.shippingAddress!.streetAddress2 || '',
-            city: checkout.shippingAddress!.city || '',
-            country: checkout.shippingAddress!.country || 'US',
-            countryArea: '',   // ← ВСЕГДА вручную
-            postalCode: '',    // ← ВСЕГДА вручную
-        }));
-    }, [checkout?.shippingAddress, isAuthenticated]);
+    const currency =
+        checkout?.totalPrice?.gross?.currency ??
+        leftColumn?.basePrice.currency ??
+        'USD'
 
+    const tax = +(totalGross - totalNet).toFixed(2)
 
-    useEffect(() => {
-        fetch('/api/checkout/create', { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                console.log('CHECKOUT RESPONSE:', data);
-                setCheckout(data);
-            });
-    }, []);
-
-    if (!checkout) {
-        return (
-            <main className="min-h-screen flex items-center justify-center">
-                <p className="text-sm text-gray-600">Loading checkout…</p>
-            </main>
-        );
-    }
-
-    const line = checkout.lines[0];
-    const subtotal = checkout.subtotalPrice.net.amount;
-    const totalNet = checkout.totalPrice.net.amount;
-    const totalGross = checkout.totalPrice.gross.amount;
-    const currency = checkout.totalPrice.gross.currency;
-    const tax = +(totalGross - totalNet).toFixed(2);
-
+    /* =========================
+       Tax update (called by button)
+       ========================= */
     async function updateTaxFromAddress() {
-        if (!checkout) return;
+        if (!checkout) return
 
         if (!address.streetAddress1 || !address.city) {
-            pushToast('info', 'Please enter street and city first');
-            setTaxReady(false);
-            return;
+            pushToast('info', 'Please enter street and city first')
+            return
         }
 
         if (!address.countryArea || address.countryArea.length < 2) {
-            pushToast('error', 'Please enter state');
-            setTaxReady(false);
-            return;
+            pushToast('error', 'Please enter state')
+            return
         }
 
         if (!/^\d{5}$/.test(address.postalCode)) {
-            pushToast('error', 'ZIP code must be 5 digits');
-            setTaxReady(false);
-            return;
+            pushToast('error', 'ZIP code must be 5 digits')
+            return
         }
 
-        setUpdatingTax(true);
+        setUpdatingTax(true)
 
         try {
             const res = await fetch('/api/checkout/address', {
@@ -180,7 +197,9 @@ export default function CheckoutClient({
                     checkoutId: checkout.id,
                     address: {
                         firstName: address.fullName.split(' ')[0] || ' ',
-                        lastName: address.fullName.split(' ').slice(1).join(' ') || ' ',
+                        lastName:
+                            address.fullName.split(' ').slice(1).join(' ') ||
+                            ' ',
                         streetAddress1: address.streetAddress1,
                         streetAddress2: address.streetAddress2 || '',
                         city: address.city,
@@ -189,74 +208,104 @@ export default function CheckoutClient({
                         postalCode: address.postalCode,
                     },
                 }),
-            });
+            })
 
-            const updatedCheckout = await res.json();
+            const updated = await res.json()
 
-            // 🔑 API ВОЗВРАЩАЕТ CHECKOUT НАПРЯМУЮ
             setCheckout(prev =>
                 prev
-                    ? {
-                        ...prev,
-                        subtotalPrice: updatedCheckout.subtotalPrice,
-                        totalPrice: updatedCheckout.totalPrice,
-                    }
+                    ? { ...prev, totalPrice: updated.totalPrice }
                     : prev
-            );
-            setTaxReady(true);
-            pushToast('success', 'Address received. Tax updated');
+            )
+
+            setTaxReady(true)
+            pushToast('success', 'Tax calculated')
         } catch {
-            setTaxReady(false);
-            pushToast('error', 'Tax calculation failed');
+            pushToast('error', 'Tax calculation failed')
         } finally {
-            setUpdatingTax(false);
+            setUpdatingTax(false)
         }
     }
 
+    /* =========================
+       Render
+       ========================= */
     return (
         <main className="min-h-screen bg-gray-100 px-6 pt-24">
-{/* TOASTS */}
             <ToastContainer toasts={toasts} onClose={closeToast} />
-            <div className="max-w-6xl mx-auto mb-6 flex gap-3">
-                <button
-                    type="button"
-                    onClick={() => router.push('/')}
-                    className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
-                >
-                    Main
-                </button>
 
-                <button
-                    type="button"
-                    onClick={() => router.push('/profile')}
-                    className="bg-[#2B3A4A] text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-[#111a2e] transition"
-                >
-                    Profile
-                </button>
-            </div>
-{/* LEFT & RIGHT COLUMNS */}
-            <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-12">
-                <CheckoutSummary
-                    checkoutImage={checkoutImage}
-                    line={line}
-                    subtotal={subtotal}
-                    tax={tax}
-                    total={totalGross}
-                    currency={currency}
-                />
-                <CheckoutLogic
-                    user={user}
-                    checkout={checkout}
-                    address={address}
-                    setAddress={setAddress}
-                    billing={billing}
-                    setBilling={setBilling}
-                    clientSecret={clientSecret} // !!!! CHECK OUT
-                    taxReady={taxReady}
-                    updatingTax={updatingTax}
-                    updateTaxFromAddress={updateTaxFromAddress}
-                />
-            </div>
+            {/* HARD LOADING ONLY */}
+            {(!checkout || !leftColumn) && (
+                <div className="flex items-center justify-center h-[60vh]">
+                    <p className="text-sm text-gray-500">
+                        Loading checkout…
+                    </p>
+                </div>
+            )}
+
+            {/* MAIN UI (ALWAYS VISIBLE) */}
+            {checkout && leftColumn && (
+                <>
+                    {/* NAV */}
+                    <div className="max-w-6xl mx-auto mb-6 flex gap-3">
+                        <button
+                            onClick={() => router.push('/')}
+                            className="bg-gray-700 text-white px-4 py-3 text-sm uppercase rounded-sm"
+                        >
+                            Main
+                        </button>
+
+                        <button
+                            onClick={() => router.push('/profile')}
+                            className="bg-[#2B3A4A] text-white px-4 py-3 text-sm uppercase rounded-sm"
+                        >
+                            Profile
+                        </button>
+                    </div>
+
+                    {/* CONTENT */}
+                    <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-12">
+                        <CheckoutSummary
+                            checkoutImage={
+                                leftColumn.image
+                                    ? {
+                                        imageUrl: leftColumn.image.url,
+                                        alt: leftColumn.image.alt ?? '',
+                                    }
+                                    : null
+                            }
+                            line={{
+                                quantity: leftColumn.quantity,
+                                variant: {
+                                    product: {
+                                        name: leftColumn.product.name,
+                                        description:
+                                            leftColumn.product.description ??
+                                            '',
+                                    },
+                                },
+                            }}
+                            subtotal={leftColumn.basePrice.net}
+                            tax={tax}
+                            total={totalGross}
+                            currency={currency}
+                        />
+
+                        <CheckoutLogic
+                            user={user}
+                            checkout={checkout}
+                            address={address}
+                            setAddress={setAddress}
+                            billing={billing}
+                            setBilling={setBilling}
+                            clientSecret={clientSecret}
+                            taxReady={taxReady}
+                            updatingTax={updatingTax}
+                            updateTaxFromAddress={updateTaxFromAddress}
+                        />
+                    </div>
+                </>
+            )}
         </main>
-    );
+    )
 }

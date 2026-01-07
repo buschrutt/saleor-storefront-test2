@@ -1,31 +1,41 @@
-export async function saleorFetch(
-    query: string,
-    options?: {
-        variables?: Record<string, unknown>;
-        headers?: Record<string, string>;
+type SaleorFetchArgs<T> = {
+    query: string
+    variables?: Record<string, unknown>
+    headers?: Record<string, string>
+}
+
+export async function saleorFetch<T>({
+                                         query,
+                                         variables,
+                                         headers = {},
+                                     }: SaleorFetchArgs<T>): Promise<T> {
+    if (!process.env.SALEOR_API_URL) {
+        throw new Error('SALEOR_API_URL is not defined')
     }
-) {
-    const response = await fetch(process.env.NEXT_PUBLIC_SALEOR_API_URL!, {
+
+    const res = await fetch(process.env.SALEOR_API_URL, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            ...options?.headers,
+            ...headers,
         },
         body: JSON.stringify({
             query,
-            variables: options?.variables,
+            variables,
         }),
-    });
+    })
 
-    const json = await response.json();
+    const json = await res.json()
 
-    if (!response.ok) {
-        console.error(
-            'Saleor error response:',
-            JSON.stringify(json, null, 2)
-        );
-        throw new Error(`Saleor API error: ${response.status}`);
+    if (!res.ok) {
+        console.error('Saleor HTTP error:', res.status, json)
+        throw new Error(`Saleor HTTP error ${res.status}`)
     }
 
-    return json;
+    if (json.errors) {
+        console.error('Saleor GraphQL error:', json.errors)
+        throw new Error('Saleor GraphQL error')
+    }
+
+    return json.data as T
 }

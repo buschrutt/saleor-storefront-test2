@@ -54,19 +54,17 @@ function ToastContainer({
 /* =========================
    Reusable form field
    ========================= */
-type FormFieldProps = {
-    label: string
-    type?: string
-    value: string
-    onChange: (value: string) => void
-}
-
 function FormField({
                        label,
                        type = 'text',
                        value,
                        onChange,
-                   }: FormFieldProps) {
+                   }: {
+    label: string
+    type?: string
+    value: string
+    onChange: (value: string) => void
+}) {
     return (
         <fieldset className="border border-gray-300 px-3 pb-3 pt-1 rounded-md">
             <legend className="px-1 text-xs tracking-wide text-gray-600">
@@ -86,22 +84,17 @@ function FormField({
 /* =========================
    Login form
    ========================= */
-function LoginForm({
-                       pushToast,
-                   }: {
-    pushToast: (t: ToastType, m: string) => void
-}) {
+function LoginForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void }) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
-    const [recoveryEmail, setRecoveryEmail] = useState('')
-    const [loadingSignIn, setLoadingSignIn] = useState(false)
-    const [loadingRecover, setLoadingRecover] = useState(false)
+    const [loading, setLoading] = useState(false)
 
     async function signIn() {
-        setLoadingSignIn(true)
+        setLoading(true)
         try {
             const res = await fetch('/api/login', {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password }),
             })
@@ -118,51 +111,7 @@ function LoginForm({
         } catch {
             pushToast('error', 'Sign in failed')
         } finally {
-            setLoadingSignIn(false)
-        }
-    }
-
-    async function recover() {
-        if (!recoveryEmail.trim()) {
-            pushToast('error', 'Please enter recovery email')
-            return
-        }
-
-        setLoadingRecover(true)
-
-        try {
-            const result = await saleorFetch(
-                `
-                mutation RequestPasswordReset($email: String!, $redirectUrl: String!) {
-                  requestPasswordReset(email: $email, redirectUrl: $redirectUrl) {
-                    errors { message }
-                  }
-                }
-                `,
-                {
-                    variables: {
-                        email: recoveryEmail,
-                        redirectUrl: 'https://pacificmule.com/password-reset',
-                    },
-                }
-            )
-
-            if (result?.data?.requestPasswordReset?.errors?.length) {
-                pushToast(
-                    'error',
-                    result.data.requestPasswordReset.errors[0].message
-                )
-                return
-            }
-
-            pushToast(
-                'success',
-                'If this email exists, recovery instructions were sent'
-            )
-        } catch {
-            pushToast('error', 'Recovery request failed')
-        } finally {
-            setLoadingRecover(false)
+            setLoading(false)
         }
     }
 
@@ -178,25 +127,10 @@ function LoginForm({
 
             <button
                 onClick={signIn}
-                disabled={loadingSignIn}
+                disabled={loading}
                 className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
             >
-                {loadingSignIn ? 'Signing In…' : 'Sign In'}
-            </button>
-
-            <FormField
-                label="Recovery Email"
-                type="email"
-                value={recoveryEmail}
-                onChange={setRecoveryEmail}
-            />
-
-            <button
-                onClick={recover}
-                disabled={loadingRecover}
-                className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
-            >
-                {loadingRecover ? 'Recovering…' : 'Recover'}
+                {loading ? 'Signing In…' : 'Sign In'}
             </button>
         </div>
     )
@@ -205,11 +139,7 @@ function LoginForm({
 /* =========================
    Register form
    ========================= */
-function RegisterForm({
-                          pushToast,
-                      }: {
-    pushToast: (t: ToastType, m: string) => void
-}) {
+function RegisterForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void }) {
     const [email, setEmail] = useState('')
     const [firstName, setFirstName] = useState('')
     const [lastName, setLastName] = useState('')
@@ -224,43 +154,41 @@ function RegisterForm({
         }
 
         setLoading(true)
-
         try {
-            const result = await saleorFetch(
-                `
-                mutation Register(
-                  $email: String!
-                  $password: String!
-                  $firstName: String!
-                  $lastName: String!
-                ) {
-                  accountRegister(
-                    input: {
-                      email: $email
-                      password: $password
-                      firstName: $firstName
-                      lastName: $lastName
-                      redirectUrl: "https://pacificmule.com/login"
-                    }
-                  ) {
-                    errors { message }
-                  }
+            const result = await saleorFetch<{
+                accountRegister: {
+                    errors: { message: string }[]
                 }
+            }>({
+                query: `
+                    mutation Register(
+                      $email: String!
+                      $password: String!
+                      $firstName: String!
+                      $lastName: String!
+                    ) {
+                      accountRegister(
+                        input: {
+                          email: $email
+                          password: $password
+                          firstName: $firstName
+                          lastName: $lastName
+                          redirectUrl: "https://pacificmule.com/login"
+                        }
+                      ) {
+                        errors { message }
+                      }
+                    }
                 `,
-                { variables: { email, password, firstName, lastName } }
-            )
+                variables: { email, password, firstName, lastName },
+            })
 
-            const errors = result?.data?.accountRegister?.errors ?? []
-            if (errors.length) {
-                pushToast('error', errors[0].message)
+            if (result.accountRegister.errors.length) {
+                pushToast('error', result.accountRegister.errors[0].message)
                 return
             }
 
-            pushToast(
-                'success',
-                'Check your email to confirm registration'
-            )
-
+            pushToast('success', 'Check your email to confirm registration')
             setEmail('')
             setFirstName('')
             setLastName('')
@@ -309,62 +237,51 @@ export default function LoginClient() {
     const [toasts, setToasts] = useState<Toast[]>([])
     const params = useSearchParams()
     const router = useRouter()
-
     const processedRef = useRef(false)
 
     function pushToast(type: ToastType, message: string) {
         const id = Date.now()
         setToasts((t) => [...t, { id, type, message }])
-        setTimeout(
-            () => setToasts((t) => t.filter((toast) => toast.id !== id)),
-            4000
-        )
+        setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000)
     }
 
     function closeToast(id: number) {
-        setToasts((t) => t.filter((toast) => toast.id !== id))
+        setToasts((t) => t.filter((x) => x.id !== id))
     }
 
     /* =========================
-       Email confirmation ONLY
+       Email confirmation
        ========================= */
     useEffect(() => {
         const email = params.get('email')
         const token = params.get('token')
-
-        if (!email || !token) return
-        if (processedRef.current) return
-
-        // ⛔️ reset-токены здесь не трогаем
-        if (window.location.pathname !== '/login') return
+        if (!email || !token || processedRef.current) return
 
         processedRef.current = true
 
         ;(async () => {
             try {
-                const result = await saleorFetch(
-                    `
-                    mutation ConfirmAccount($email: String!, $token: String!) {
-                      confirmAccount(email: $email, token: $token) {
-                        errors { message }
-                      }
-                    }
+                const result = await saleorFetch<{
+                    confirmAccount: { errors: { message: string }[] }
+                }>({
+                    query: `
+                        mutation ConfirmAccount($email: String!, $token: String!) {
+                          confirmAccount(email: $email, token: $token) {
+                            errors { message }
+                          }
+                        }
                     `,
-                    { variables: { email, token } }
-                )
+                    variables: { email, token },
+                })
 
-                if (result?.data?.confirmAccount?.errors?.length) {
-                    pushToast(
-                        'error',
-                        result.data.confirmAccount.errors[0].message
-                    )
+                if (result.confirmAccount.errors.length) {
+                    pushToast('error', result.confirmAccount.errors[0].message)
                 } else {
                     pushToast('success', 'Email successfully confirmed')
                 }
-
-                router.replace('/login')
             } catch {
                 pushToast('error', 'Confirmation failed')
+            } finally {
                 router.replace('/login')
             }
         })()
@@ -374,9 +291,10 @@ export default function LoginClient() {
         <main className="min-h-screen bg-gray-100 relative">
             <ToastContainer toasts={toasts} onClose={closeToast} />
 
-            {/* ⬅️ НАВИГАЦИЯ ОСТАЁТСЯ */}
+            {/* NAV buttons */}
             <div className="absolute top-6 left-6 flex flex-col gap-3">
                 <button
+                    type="button"
                     onClick={() => router.push('/')}
                     className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
                 >
@@ -384,12 +302,14 @@ export default function LoginClient() {
                 </button>
 
                 <button
+                    type="button"
                     onClick={() => router.push('/checkout')}
                     className="bg-[#2B3A4A] text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-[#111a2e] transition"
                 >
                     Checkout
                 </button>
             </div>
+
 
             <div className="max-w-6xl mx-auto pt-24 px-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-12">

@@ -1,78 +1,85 @@
-import { NextResponse } from 'next/server';
-import { saleorFetch } from '@/lib/saleor';
+import { NextResponse } from 'next/server'
+import { saleorFetch } from '@/lib/saleor'
 
 type AddressInput = {
-    fullName?: string;
-    streetAddress1: string;
-    streetAddress2?: string;
-    city: string;
-    countryArea?: string;
-    postalCode: string;
-    country: string;
-};
+    fullName?: string
+    streetAddress1: string
+    streetAddress2?: string
+    city: string
+    countryArea: string
+    postalCode: string
+    country: string
+}
+
+type CheckoutAddressUpdateResult = {
+    checkoutShippingAddressUpdate: {
+        checkout: {
+            id: string
+            totalPrice: {
+                net: { amount: number }
+                gross: { amount: number; currency: string }
+            }
+        } | null
+        errors: { field: string | null; message: string }[]
+    }
+}
 
 export async function POST(req: Request) {
     try {
-        const { checkoutId, address }: { checkoutId: string; address: AddressInput } =
-            await req.json();
+        const {
+            checkoutId,
+            address,
+        }: { checkoutId: string; address: AddressInput } = await req.json()
 
-        const result = await saleorFetch(
-            `
-      mutation UpdateShippingAddress(
-        $checkoutId: ID!
-        $address: AddressInput!
-      ) {
-        checkoutShippingAddressUpdate(
-          checkoutId: $checkoutId
-          shippingAddress: $address
-        ) {
-          checkout {
-            id
-
-            subtotalPrice {
-              net { amount }
+        const query = `
+            mutation UpdateShippingAddress(
+                $checkoutId: ID!
+                $address: AddressInput!
+            ) {
+                checkoutShippingAddressUpdate(
+                    checkoutId: $checkoutId
+                    shippingAddress: $address
+                ) {
+                    checkout {
+                        id
+                        totalPrice {
+                            net { amount }
+                            gross { amount currency }
+                        }
+                    }
+                    errors {
+                        field
+                        message
+                    }
+                }
             }
+        `
 
-            totalPrice {
-              net { amount }
-              gross { amount currency }
-            }
-          }
-          errors {
-            field
-            message
-          }
-        }
-      }
-      `,
-            {
-                variables: {
-                    checkoutId,
-                    address,
-                },
-            }
-        );
+        const data = await saleorFetch<CheckoutAddressUpdateResult>({
+            query,
+            variables: {
+                checkoutId,
+                address,
+            },
+        })
 
-        const data = result?.data?.checkoutShippingAddressUpdate;
+        const result = data.checkoutShippingAddressUpdate
 
-        if (data?.errors?.length) {
-            console.error('address update errors:', data.errors);
-            return NextResponse.json({ errors: data.errors }, { status: 400 });
-        }
-
-        if (!data?.checkout) {
+        if (result.errors.length || !result.checkout) {
+            console.error('address update errors:', result.errors)
             return NextResponse.json(
-                { error: 'Checkout not returned' },
+                { error: 'Address update failed' },
                 { status: 400 }
-            );
+            )
         }
 
-        return NextResponse.json(data.checkout);
+        // ⬅️ ВАЖНО: возвращаем ТОЛЬКО checkout с totalPrice
+        return NextResponse.json(result.checkout)
     } catch (err) {
-        console.error('address update exception:', err);
+        console.error('address update exception:', err)
         return NextResponse.json(
             { error: 'Failed to update address' },
             { status: 500 }
-        );
+        )
     }
 }

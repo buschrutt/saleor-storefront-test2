@@ -60,7 +60,7 @@ export function CheckoutSummary({
                         </div>
                     )}
 
-                    <div className="text-gray-400 text-xs tracking-wide">
+                    <br/><div className="text-gray-400 text-xs tracking-wide">
                         Qty: {line.quantity}.00
                     </div>
                 </div>
@@ -86,7 +86,7 @@ export function CheckoutSummary({
 
                 <div className="border-t border-gray-200" />
 
-                <div className="flex justify-between font-medium text-base">
+                <div className="flex justify-between font-medium text-base mb-24">
                     <span>
                         <strong>TOTAL:</strong>
                     </span>

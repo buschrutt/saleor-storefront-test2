@@ -34,6 +34,9 @@ function FormField({
     )
 }
 
+/* =========================
+   Types
+   ========================= */
 type ProfileUpdatePayload = {
     firstName?: string
     lastName?: string
@@ -58,26 +61,22 @@ function getErrorMessage(error: unknown): string {
 }
 
 function isAuthError(error: unknown): boolean {
-    const message = getErrorMessage(error).toLowerCase()
-    return (
-        message.includes('401') ||
-        message.includes('403') ||
-        message.includes('unauthorized') ||
-        message.includes('forbidden') ||
-        message.includes('no user data') ||
-        message.includes('user not found')
-    )
+    const msg = getErrorMessage(error).toLowerCase()
+    return msg.includes('401') || msg.includes('403') || msg.includes('unauthorized')
 }
 
+/* =========================
+   Page
+   ========================= */
 export default function ProfilePage() {
     const router = useRouter()
 
-    // UI / state
+    // state
     const [loading, setLoading] = useState(true)
-    const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
     const [saving, setSaving] = useState(false)
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
 
-    // Toasts
+    // toasts
     const [toasts, setToasts] = useState<Toast[]>([])
     function pushToast(type: ToastType, message: string) {
         const id = Date.now()
@@ -88,10 +87,8 @@ export default function ProfilePage() {
         setToasts((t) => t.filter((x) => x.id !== id))
     }
 
-    // display
-    const [email, setEmail] = useState('')
-
     // profile
+    const [email, setEmail] = useState('')
     const [firstName, setFirstName] = useState('')
     const [lastName, setLastName] = useState('')
 
@@ -108,16 +105,19 @@ export default function ProfilePage() {
     const [newPassword, setNewPassword] = useState('')
     const [confirmPassword, setConfirmPassword] = useState('')
 
+    /* =========================
+       Load profile
+       ========================= */
     async function loadProfile() {
-        const profileRes = await authFetch('/api/profile', {}, router)
+        const res = await authFetch('/api/profile', { credentials: 'include' }, router)
 
-        if (!profileRes.ok) {
-            const txt = await profileRes.text().catch(() => `HTTP ${profileRes.status}`)
+        if (!res.ok) {
+            const txt = await res.text().catch(() => `HTTP ${res.status}`)
             throw new Error(`Failed to load profile: ${txt}`)
         }
 
-        const profileData = await profileRes.json()
-        const me = profileData?.me
+        const { me } = await res.json()
+
         if (!me?.email) {
             setIsAuthenticated(false)
             router.replace('/login')
@@ -125,7 +125,7 @@ export default function ProfilePage() {
         }
 
         setIsAuthenticated(true)
-        setEmail(me.email || '')
+        setEmail(me.email)
         setFirstName(me.firstName ?? '')
         setLastName(me.lastName ?? '')
 
@@ -134,24 +134,19 @@ export default function ProfilePage() {
             setStreet1(a.streetAddress1 ?? '')
             setStreet2(a.streetAddress2 ?? '')
             setCity(a.city ?? '')
-            setZip(a.postalCode ?? '')
             setState(a.countryArea ?? '')
+            setZip(a.postalCode ?? '')
             setCountry(a.country?.code ?? 'US')
         }
     }
 
-    /* =========================
-       Initial load
-       ========================= */
     useEffect(() => {
         ;(async () => {
-            setLoading(true)
             try {
                 await loadProfile()
             } catch (err) {
-                console.error('Profile load error:', err)
+                console.error(err)
                 if (isAuthError(err)) {
-                    setIsAuthenticated(false)
                     router.replace('/login')
                 } else {
                     pushToast('error', getErrorMessage(err))
@@ -161,36 +156,37 @@ export default function ProfilePage() {
             }
         })()
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [router])
+    }, [])
 
     /* =========================
-       Strong check: require current password for ANY update
-       Реальная проверка делается через tokenCreate (Saleor проверит пароль)
+       Verify password
        ========================= */
     async function verifyCurrentPasswordOrThrow() {
-        if (!email) throw new Error('Email is missing')
+        if (!email) throw new Error('Email missing')
+        if (!currentPassword.trim()) throw new Error('Current password required')
 
-        const cp = currentPassword.trim()
-        if (!cp) {
-            // ВАЖНО: THROW, а не return — иначе submit продолжит выполнение
-            throw new Error('Current password is required')
-        }
+        const result = await saleorFetch<{
+            tokenCreate: {
+                errors: { message: string }[]
+                token?: string
+            }
+        }>({
+            query: `
+                mutation VerifyPassword($email: String!, $password: String!) {
+                    tokenCreate(email: $email, password: $password) {
+                        errors { message }
+                        token
+                    }
+                }
+            `,
+            variables: {
+                email,
+                password: currentPassword.trim(),
+            },
+        })
 
-        const result = await saleorFetch(
-            `
-        mutation VerifyPassword($email: String!, $password: String!) {
-          tokenCreate(email: $email, password: $password) {
-            errors { message code }
-            token
-          }
-        }
-      `,
-            { variables: { email, password: cp } }
-        )
-
-        const errors = result?.data?.tokenCreate?.errors ?? []
-        if (errors.length) {
-            throw new Error(errors[0].message || 'Current password is incorrect')
+        if (result.tokenCreate.errors.length) {
+            throw new Error(result.tokenCreate.errors[0].message)
         }
     }
 
@@ -200,11 +196,9 @@ export default function ProfilePage() {
     async function submit() {
         if (saving) return
 
-        // 1) Validation (password change)
-        const wantsPasswordChange = !!(newPassword || confirmPassword)
-        if (wantsPasswordChange) {
+        if (newPassword || confirmPassword) {
             if (!newPassword || !confirmPassword) {
-                pushToast('error', 'Please enter and confirm new password')
+                pushToast('error', 'Please confirm new password')
                 return
             }
             if (newPassword !== confirmPassword) {
@@ -212,64 +206,50 @@ export default function ProfilePage() {
                 return
             }
             if (newPassword.length < 8) {
-                pushToast('error', 'New password is too short')
+                pushToast('error', 'Password too short')
                 return
             }
         }
 
-        // 2) Build payload
         const payload: ProfileUpdatePayload = {}
 
-        const fn = firstName.trim()
-        const ln = lastName.trim()
-        if (fn || ln) {
-            payload.firstName = fn
-            payload.lastName = ln
+        if (firstName.trim() || lastName.trim()) {
+            payload.firstName = firstName.trim()
+            payload.lastName = lastName.trim()
         }
 
-        const s1 = street1.trim()
-        const s2 = street2.trim()
-        const c = city.trim()
-        const st = state.trim()
-        const z = zip.trim()
-        const co = country.trim()
-
-        if (s1 || s2 || c || st || z || co) {
+        if (street1 || street2 || city || state || zip) {
             payload.shippingAddress = {
-                streetAddress1: s1,
-                streetAddress2: s2,
-                city: c,
-                countryArea: st,
-                postalCode: z,
-                country: co || 'US',
+                streetAddress1: street1,
+                streetAddress2: street2,
+                city,
+                countryArea: state,
+                postalCode: zip,
+                country,
             }
         }
 
-        if (wantsPasswordChange) {
+        if (newPassword) {
             payload.password = {
                 currentPassword: currentPassword.trim(),
-                newPassword: newPassword,
+                newPassword,
             }
         }
 
-        const hasAnyUpdate = !!(payload.firstName || payload.shippingAddress || payload.password)
-        if (!hasAnyUpdate) {
+        if (!Object.keys(payload).length) {
             pushToast('error', 'No changes to save')
             return
         }
 
         setSaving(true)
         try {
-            // 3) REQUIRE + VERIFY current password for ANY update
             await verifyCurrentPasswordOrThrow()
 
-            pushToast('info', 'Saving…')
-
-            // 4) Send update to your API
             const res = await authFetch(
                 '/api/profile',
                 {
                     method: 'POST',
+                    credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
                 },
@@ -277,47 +257,30 @@ export default function ProfilePage() {
             )
 
             const data = await res.json().catch(() => ({}))
-            if (!res.ok) {
-                throw new Error(data.error || data.message || `Update failed with status ${res.status}`)
-            }
+            if (!res.ok) throw new Error(data.error || 'Update failed')
 
-            // Clear security fields after success
+            setCurrentPassword('')
             setNewPassword('')
             setConfirmPassword('')
-            setCurrentPassword('')
 
             await loadProfile()
             pushToast('success', 'Profile updated')
         } catch (err) {
-            console.error('Update error:', err)
-            if (isAuthError(err)) {
-                setIsAuthenticated(false)
-                router.replace('/login')
-            } else {
-                pushToast('error', getErrorMessage(err))
-            }
+            console.error(err)
+            pushToast('error', getErrorMessage(err))
         } finally {
             setSaving(false)
         }
     }
 
     /* =========================
-       Render states
+       Render
        ========================= */
     if (loading) {
         return (
-            <main className="min-h-screen bg-gray-100 relative">
+            <main className="min-h-screen bg-gray-100">
                 <ToastContainer toasts={toasts} onClose={closeToast} />
-                <div className="p-8 text-sm uppercase tracking-wide text-gray-500">Loading profile…</div>
-            </main>
-        )
-    }
-
-    if (isAuthenticated === false) {
-        return (
-            <main className="min-h-screen bg-gray-100 relative">
-                <ToastContainer toasts={toasts} onClose={closeToast} />
-                <div className="p-8 text-sm uppercase tracking-wide text-gray-500">Redirecting to login…</div>
+                <div className="p-8 text-sm">Loading profile…</div>
             </main>
         )
     }
@@ -325,7 +288,7 @@ export default function ProfilePage() {
     if (!isAuthenticated) return null
 
     return (
-        <main className="min-h-screen bg-gray-100 relative">
+        <main className="min-h-screen bg-gray-100">
             <ToastContainer toasts={toasts} onClose={closeToast} />
 
             {/* NAV buttons */}
@@ -350,7 +313,7 @@ export default function ProfilePage() {
                     type="button"
                     onClick={async () => {
                         try {
-                            await fetch('/api/logout', { method: 'POST' })
+                            await fetch('/api/logout', { method: 'POST', credentials: 'include' })
                         } finally {
                             router.replace('/login')
                         }
@@ -361,41 +324,38 @@ export default function ProfilePage() {
                 </button>
             </div>
 
-            <div className="max-w-xl mx-auto pt-24 px-4 space-y-10">
-                <h1 className="text-sm uppercase tracking-wide text-gray-700">Profile · {email}</h1>
 
-                {/* PROFILE */}
-                <section className="space-y-6">
-                    <h2 className="text-xs uppercase tracking-wide text-gray-600">Personal Information</h2>
+            <div className="max-w-xl mx-auto pt-24 px-4 space-y-10">
+                <h1 className="text-sm uppercase tracking-wide">Profile · {email}</h1>
+
+                <section className="space-y-4">
                     <FormField label="First Name" value={firstName} onChange={setFirstName} />
                     <FormField label="Last Name" value={lastName} onChange={setLastName} />
                 </section>
 
-                {/* SHIPPING */}
-                <section className="space-y-6">
-                    <h2 className="text-xs uppercase tracking-wide text-gray-600">Shipping Address</h2>
+                <section className="space-y-4">
                     <FormField label="Street line 1" value={street1} onChange={setStreet1} />
                     <FormField label="Street line 2" value={street2} onChange={setStreet2} />
                     <FormField label="City" value={city} onChange={setCity} />
-                    <FormField label="State / Province" value={state} onChange={setState} />
-                    <FormField label="ZIP / Postal Code" value={zip} onChange={setZip} />
-                    <FormField label="Country" value={country} onChange={setCountry} />
+                    <FormField label="State" value={state} onChange={setState} />
+                    <FormField label="ZIP" value={zip} onChange={setZip} />
                 </section>
 
-                {/* SECURITY */}
-                <section className="space-y-6">
-                    <h2 className="text-xs uppercase tracking-wide text-gray-600">Change Password</h2>
-                    <FormField label="New Password" type="password" value={newPassword} onChange={setNewPassword} />
+                <section className="space-y-4">
                     <FormField
-                        label="Confirm New Password"
+                        label="New Password"
+                        type="password"
+                        value={newPassword}
+                        onChange={setNewPassword}
+                    />
+                    <FormField
+                        label="Confirm Password"
                         type="password"
                         value={confirmPassword}
                         onChange={setConfirmPassword}
                     />
-
-                    <h2 className="text-xs uppercase tracking-wide text-gray-600">CONFIRM CHANGES</h2>
                     <FormField
-                        label="Current Password (required to save)"
+                        label="Current Password (required)"
                         type="password"
                         value={currentPassword}
                         onChange={setCurrentPassword}
@@ -403,10 +363,9 @@ export default function ProfilePage() {
                 </section>
 
                 <button
-                    type="button"
                     onClick={submit}
                     disabled={saving}
-                    className="bg-[#2B3A4A] text-white px-6 py-3 mb-24 uppercase text-sm tracking-wide rounded-sm hover:bg-[#111a2e] transition disabled:opacity-60"
+                    className="bg-[#2B3A4A] text-white px-6 py-3 uppercase text-sm rounded-sm disabled:opacity-60 mb-24"
                 >
                     {saving ? 'Saving…' : 'Save →'}
                 </button>

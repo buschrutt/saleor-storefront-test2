@@ -12,14 +12,15 @@ export default function StripeProvider({
                                            clientSecret,
                                            children,
                                        }: {
-    clientSecret: string;
-    children: ReactNode;
+    clientSecret?: string;
+    children: React.ReactNode;
 }) {
+    if (!clientSecret) return null;
+
     return (
         <Elements
             stripe={stripePromise}
             options={{ clientSecret }}
-            key={clientSecret}   // КРИТИЧЕСКИ ВАЖНО
         >
             {children}
         </Elements>
