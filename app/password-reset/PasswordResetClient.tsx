@@ -37,6 +37,7 @@ function ToastContainer({ toasts, onClose }: ToastContainerProps) {
                         onClick={() => onClose(toast.id)}
                         className="absolute top-2 right-3 text-xs opacity-70 hover:opacity-100"
                         aria-label="Close"
+                        type="button"
                     >
                         ✕
                     </button>
@@ -73,11 +74,22 @@ function FormField({
                 type={type}
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
-                className="w-full bg-transparent outline-none text-sm"
+                className="w-full bg-transparent outline-none text-sm h-10"
                 autoComplete="new-password"
             />
         </fieldset>
     )
+}
+
+/* =========================
+   GraphQL types
+   ========================= */
+
+type SetPasswordResponse = {
+    setPassword: {
+        token: string | null
+        errors: { message: string }[]
+    }
 }
 
 /* =========================
@@ -109,48 +121,61 @@ export default function PasswordResetClient() {
             return
         }
 
+        if (!password.trim()) {
+            pushToast('error', 'Enter a new password')
+            return
+        }
+
         setLoading(true)
 
         try {
-            const result = await saleorFetch(
-                `
-        mutation SetPassword(
-          $email: String!
-          $token: String!
-          $password: String!
-        ) {
-          setPassword(
-            email: $email
-            token: $token
-            password: $password
-          ) {
-            token
-            errors { message }
-          }
-        }
-        `,
-                {
-                    variables: {
-                        email,
-                        token,
-                        password,
-                    },
-                }
-            )
+            const result = await saleorFetch<SetPasswordResponse>({
+                query: `
+                    mutation SetPassword(
+                      $email: String!
+                      $token: String!
+                      $password: String!
+                    ) {
+                      setPassword(
+                        email: $email
+                        token: $token
+                        password: $password
+                      ) {
+                        token
+                        errors { message }
+                      }
+                    }
+                `,
+                variables: {
+                    email,
+                    token,
+                    password,
+                },
+            })
 
-            const data = result?.data?.setPassword
+            const data = result.setPassword
 
-            if (data?.errors?.length) {
-                pushToast('error', data.errors[0].message)
+            if (data.errors?.length) {
+                pushToast('error', data.errors[0]?.message || 'Password reset failed')
                 return
             }
 
+            if (!data.token) {
+                pushToast('error', 'Password reset failed')
+                return
+            }
+
+            // NOTE: если твой проект уже перешёл на httpOnly cookie (saleor_token),
+            // тогда здесь лучше вызывать /api/login или /api/auth/set-cookie,
+            // а не localStorage. Пока оставляю как у тебя.
             localStorage.setItem('saleor_token', data.token)
+
             pushToast('success', 'Password updated')
 
             router.replace('/profile')
             router.refresh()
-        } catch {
+        } catch (err) {
+            console.error(err)
             pushToast('error', 'Password reset failed')
         } finally {
             setLoading(false)
@@ -183,6 +208,7 @@ export default function PasswordResetClient() {
                         onClick={submit}
                         disabled={loading}
                         className="flex items-center gap-2 uppercase text-sm tracking-wide disabled:opacity-50"
+                        type="button"
                     >
                         <span>{loading ? 'Saving…' : 'Save Password'}</span>
                         <span>→</span>
