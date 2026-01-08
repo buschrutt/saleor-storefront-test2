@@ -48,6 +48,77 @@ export type AddressInput = {
     companyName?: string;
 };
 
+export type PaymentData = {
+    paymentMethod?: string;
+    paymentMethodId?: string;
+    type?: string;
+    savePaymentMethod?: boolean;
+    returnUrl?: string;
+    paymentIntent?: string;
+    status?: string;
+    [key: string]: unknown; // Для дополнительных полей
+};
+
+export type GatewayConfig = {
+    id: string;
+    data?: Record<string, unknown>;
+    errors?: Array<{
+        field: string | null;
+        message: string | null;
+        code: string;
+    }>;
+};
+
+export type TransactionResult = {
+    transaction?: {
+        id: string;
+    };
+    data?: Record<string, unknown>;
+    errors?: Array<{
+        field: string | null;
+        message: string | null;
+        code: string;
+    }>;
+};
+
+export type CheckoutCompleteResult = {
+    order?: {
+        id: string;
+    };
+    errors?: Array<{
+        field: string | null;
+        message: string | null;
+        code: string;
+    }>;
+};
+
+/* =========================
+   GraphQL Response Types
+========================= */
+
+type GatewayInitResponse = {
+    paymentGatewayInitialize?: {
+        gatewayConfigs?: GatewayConfig[];
+        errors?: Array<{
+            field: string | null;
+            message: string | null;
+            code: string;
+        }>;
+    };
+};
+
+type TransactionInitResponse = {
+    transactionInitialize?: TransactionResult;
+};
+
+type TransactionProcessResponse = {
+    transactionProcess?: TransactionResult;
+};
+
+type CheckoutCompleteResponse = {
+    checkoutComplete?: CheckoutCompleteResult;
+};
+
 /* =========================
    Payment flow
 ========================= */
@@ -57,9 +128,11 @@ export async function runPaymentFlow(params: {
     email: string;
     billingAddress: AddressInput;
     amount: number;
-    paymentData: unknown;
+    paymentData: PaymentData;
 }) {
     const { checkoutId, email, billingAddress, amount, paymentData } = params;
+
+    console.log('🔄 Starting payment flow for checkout:', checkoutId);
 
     /* 0️⃣ EMAIL — ОБЯЗАТЕЛЬНО */
     await saleorFetch({
@@ -74,14 +147,10 @@ export async function runPaymentFlow(params: {
     });
 
     /* 2️⃣ Gateway init */
-    const gatewayInit = (await saleorFetch({
+    const gatewayInit = await saleorFetch<GatewayInitResponse>({
         query: GatewayInitialization,
         variables: { checkoutId, amount },
-    })) as {
-        paymentGatewayInitialize?: {
-            gatewayConfigs?: { id: string }[];
-        };
-    };
+    });
 
     const gatewayId =
         gatewayInit.paymentGatewayInitialize?.gatewayConfigs?.[0]?.id;
@@ -90,20 +159,18 @@ export async function runPaymentFlow(params: {
         throw new Error('Stripe gateway not initialized');
     }
 
+    console.log('✅ Gateway initialized:', gatewayId);
+
     /* 3️⃣ Transaction init */
-    const transactionInit = (await saleorFetch({
+    const transactionInit = await saleorFetch<TransactionInitResponse>({
         query: TransactionInitialization,
         variables: {
             checkoutId,
             paymentGatewayId: gatewayId,
             amount,
-            data: paymentData,
+            data: paymentData as Record<string, unknown>, // Приводим к нужному типу
         },
-    })) as {
-        transactionInitialize?: {
-            transaction?: { id: string };
-        };
-    };
+    });
 
     const transactionId =
         transactionInit.transactionInitialize?.transaction?.id;
@@ -112,21 +179,64 @@ export async function runPaymentFlow(params: {
         throw new Error('Transaction not created');
     }
 
+    console.log('✅ Transaction created:', transactionId);
+
     /* 4️⃣ Process transaction */
-    await saleorFetch({
+    await saleorFetch<TransactionProcessResponse>({
         query: TransactionProcessing,
         variables: { transactionId },
     });
 
+    console.log('✅ Transaction processed');
+
+    /* 🔴 ВАЖНОЕ ДОПОЛНЕНИЕ: Подтверждаем транзакцию */
+    try {
+        console.log('💳 Charging transaction:', transactionId, 'amount:', amount);
+
+        // Создаем мутацию для подтверждения транзакции
+        const chargeMutation = `
+            mutation TransactionCharge($transactionId: ID!, $amount: PositiveDecimal!) {
+                transactionRequestAction(
+                    id: $transactionId
+                    actionType: CHARGE
+                    amount: $amount
+                ) {
+                    transaction {
+                        id
+                        actions
+                        chargedAmount {
+                            amount
+                            currency
+                        }
+                    }
+                    errors {
+                        field
+                        message
+                        code
+                    }
+                }
+            }
+        `;
+
+        const chargeResult = await saleorFetch({
+            query: chargeMutation,
+            variables: {
+                transactionId,
+                amount,
+            },
+        });
+
+        console.log('✅ Transaction charged:', chargeResult);
+    } catch (chargeError) {
+        console.error('❌ Failed to charge transaction:', chargeError);
+        // Не прерываем процесс, продолжаем с чекаутом
+    }
+
     /* 5️⃣ Complete checkout */
-    const completed = (await saleorFetch({
+    const completed = await saleorFetch<CheckoutCompleteResponse>({
         query: CompleteCheckout,
         variables: { checkoutId },
-    })) as {
-        checkoutComplete?: {
-            order?: { id: string };
-        };
-    };
+    });
 
     const order = completed.checkoutComplete?.order;
 
@@ -134,5 +244,10 @@ export async function runPaymentFlow(params: {
         throw new Error('Checkout not completed');
     }
 
-    return order;
+    console.log('✅ Order created:', order.id);
+
+    return {
+        order,
+        transactionId,
+    };
 }

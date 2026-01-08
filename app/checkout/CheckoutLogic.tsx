@@ -58,7 +58,7 @@ const CARD_STYLE = {
                 color: '#9ca3af',
                 fontSize: '14px'
             },
-            lineHeight: '40px', // Важно: задаем высоту строки
+            lineHeight: '40px',
         },
         invalid: {
             color: '#dc2626'
@@ -71,7 +71,6 @@ const CARD_STYLE = {
    ========================= */
 
 function PayForm({
-                     clientSecret,
                      billing,
                      setBilling,
                      taxReady,
@@ -80,7 +79,6 @@ function PayForm({
                      user,
                      pushToast,
                  }: {
-    clientSecret: string;
     billing: Billing;
     setBilling: React.Dispatch<React.SetStateAction<Billing>>;
     taxReady: boolean;
@@ -115,85 +113,89 @@ function PayForm({
         setPaying(true);
         pushToast('info', 'Processing payment…');
 
-        /* 1️⃣ Stripe confirm */
-        const result = await stripe.confirmCardPayment(clientSecret, {
-            payment_method: {
-                card: elements.getElement(CardNumberElement)!,
-                billing_details: {
-                    name: `${billing.firstName} ${billing.lastName}`,
-                    address: {
-                        postal_code: billing.postalCode,
-                        state: billing.state,
-                        country: billing.country,
-                    },
+        // 1. Получаем данные карты от Stripe Elements
+        const cardElement = elements.getElement(CardNumberElement);
+        if (!cardElement) {
+            pushToast('error', 'Card details missing');
+            setPaying(false);
+            return;
+        }
+
+        // 2. Создаем payment method в Stripe
+        const { paymentMethod, error } = await stripe.createPaymentMethod({
+            type: 'card',
+            card: cardElement,
+            billing_details: {
+                name: `${billing.firstName} ${billing.lastName}`,
+                address: {
+                    postal_code: billing.postalCode,
+                    state: billing.state,
+                    country: billing.country,
                 },
             },
         });
 
-        if (result.error) {
-            pushToast('error', result.error.message ?? 'Payment failed');
+        if (error || !paymentMethod) {
+            pushToast('error', error?.message || 'Failed to create payment method');
             setPaying(false);
             return;
         }
 
-        const paymentIntentId = result.paymentIntent?.id;
+        // 3. Определяем тип для paymentData
+        type PaymentData = {
+            paymentMethod: string;
+            type: string;
+            savePaymentMethod?: boolean;
+            returnUrl?: string;
+        };
 
-        if (!paymentIntentId) {
-            pushToast('error', 'PaymentIntent missing');
-            setPaying(false);
-            return;
-        }
+        const paymentData: PaymentData = {
+            paymentMethod: paymentMethod.id,
+            type: 'card',
+            savePaymentMethod: false,
+            returnUrl: window.location.href,
+        };
 
-        /* 2️⃣ SALEOR PAYMENT FLOW */
+        // 4. Запускаем Saleor Payment Flow
         const res = await fetch('/api/checkout/payment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 checkoutId: checkout.id,
-                email: user.email, // 👈 ВОТ ЭТА СТРОКА, ИМЕННО ТУТ
+                email: user.email,
                 billingAddress: {
                     firstName: billing.firstName,
                     lastName: billing.lastName,
                     streetAddress1: address.streetAddress1,
-                    streetAddress2: address.streetAddress2,
+                    streetAddress2: address.streetAddress2 || '',
                     city: address.city,
                     countryArea: address.countryArea,
                     postalCode: address.postalCode,
                     country: address.country,
                 },
-                amount: checkout.totalPrice?.gross?.amount,
-                paymentData: {
-                    paymentIntent: paymentIntentId,
-                    status: 'SUCCESS',
-                },
+                amount: checkout.totalPrice?.gross?.amount || 0,
+                paymentData,
             }),
         });
 
         const data = await res.json();
 
+        if (!res.ok) {
+            pushToast('error', data.error || 'Payment failed');
+            setPaying(false);
+            return;
+        }
+
         const orderId = data.orderId;
+        const total = checkout.totalPrice?.gross?.amount ?? 0;
+        const currency = checkout.totalPrice?.gross?.currency ?? 'USD';
 
-        const total =
-            checkout.totalPrice?.gross?.amount ??
-            checkout.totalPrice?.net?.amount ??
-            0;
+        pushToast('success', `Order ${orderId} created · $${total} ${currency}`);
 
-        const currency =
-            checkout.totalPrice?.gross?.currency ??
-            'USD';
-
-        /* 🎉 SUCCESS TOAST */
-        pushToast(
-            'success',
-            `Order ${orderId} created · $${total} ${currency}`
-        );
-
-        /* ⏳ DELAY → REDIRECT */
         setTimeout(() => {
             router.push('/profile');
         }, 3000);
     }
-
 
     return (
         <section className="pt-12 pb-12 border-t border-gray-200 space-y-6">
@@ -244,15 +246,15 @@ function PayForm({
             </FormField>
 
             <FormField label="Card Number">
-                    <CardNumberElement options={CARD_STYLE} />
+                <CardNumberElement options={CARD_STYLE} />
             </FormField>
 
             <FormField label="MM / YY">
-                    <CardExpiryElement options={CARD_STYLE} />
+                <CardExpiryElement options={CARD_STYLE} />
             </FormField>
 
             <FormField label="CVC">
-                    <CardCvcElement options={CARD_STYLE} />
+                <CardCvcElement options={CARD_STYLE} />
             </FormField>
 
             <button
@@ -276,7 +278,6 @@ export function CheckoutLogic({
                                   setAddress,
                                   billing,
                                   setBilling,
-                                  clientSecret,
                                   taxReady,
                                   updatingTax,
                                   updateTaxFromAddress,
@@ -289,12 +290,10 @@ export function CheckoutLogic({
     setAddress: React.Dispatch<React.SetStateAction<Address>>;
     billing: Billing;
     setBilling: React.Dispatch<React.SetStateAction<Billing>>;
-    clientSecret?: string;
     taxReady: boolean;
     updatingTax: boolean;
     updateTaxFromAddress: () => Promise<void>;
-
-    checkout: Checkout | null; // ✅ ДОБАВЛЕНО
+    checkout: Checkout | null;
     setCheckout: React.Dispatch<React.SetStateAction<Checkout | null>>;
     setTaxReady: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
@@ -327,12 +326,18 @@ export function CheckoutLogic({
     }
 
     const createCheckout = async () => {
+        console.log('🔘 PAYMENT button clicked');
+        console.log('📝 Shipping address:', address);
+        console.log('✅ Shipping valid:', shippingValid);
+
         if (!shippingValid) {
+            console.log('❌ Shipping not valid');
             pushToast('error', 'Complete shipping address');
             return;
         }
 
         setCreatingCheckout(true);
+        console.log('🔄 Creating checkout...');
 
         try {
             const checkoutAddress = {
@@ -346,82 +351,65 @@ export function CheckoutLogic({
                 country: 'US',
             };
 
+            console.log('📤 Sending to API:', { checkoutAddress, DELIVERY_METHOD_ID });
+
             const res = await fetch('/api/checkout/create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     address: checkoutAddress,
-                    deliveryMethodId: DELIVERY_METHOD_ID, // 🔑 ВОТ ОНО
+                    deliveryMethodId: DELIVERY_METHOD_ID,
                 }),
             });
 
+            console.log('📥 API response status:', res.status);
+
             const data = await res.json();
+            console.log('📦 API response data:', data);
 
             if (!res.ok) {
+                console.error('❌ API error:', data);
                 throw new Error(data.error || 'Checkout create failed');
             }
 
             const checkoutId = data.checkoutId;
             if (!checkoutId) {
+                console.error('❌ No checkoutId in response');
                 throw new Error('Checkout ID missing');
             }
 
+            console.log('✅ Checkout created:', checkoutId);
             setCheckout(data.checkout);
             setCheckoutId(checkoutId);
             setTaxReady(true);
             setPaymentOpen(true);
 
-            /* =========================
-           SUCCESS TOASTS (REAL DATA)
-        ========================= */
+            const net = data.checkout?.totalPrice?.net?.amount;
+            const gross = data.checkout?.totalPrice?.gross?.amount;
+            const currency = data.checkout?.totalPrice?.gross?.currency ?? 'USD';
+            const tax = net !== undefined && gross !== undefined
+                ? +(gross - net).toFixed(2)
+                : null;
+            const shipping = data.checkout?.shippingPrice?.gross?.amount;
 
-            const net =
-                data.checkout?.totalPrice?.net?.amount;
-
-            const gross =
-                data.checkout?.totalPrice?.gross?.amount;
-
-            const currency =
-                data.checkout?.totalPrice?.gross?.currency ?? 'USD';
-
-            const tax =
-                net !== undefined && gross !== undefined
-                    ? +(gross - net).toFixed(2)
-                    : null;
-
-            const shipping =
-                data.checkout?.shippingPrice?.gross?.amount;
-
-            // TAX
             if (tax !== null) {
-                pushToast(
-                    'success',
-                    `Tax updated · $${tax} ${currency}`
-                );
+                pushToast('success', `Tax updated · $${tax} ${currency}`);
             }
 
-            // DELIVERY
             if (shipping !== undefined) {
-                pushToast(
-                    'success',
-                    `Delivery method added · $${shipping} ${currency}`
-                );
+                pushToast('success', `Delivery method added · $${shipping} ${currency}`);
             }
 
-            // CHECKOUT CREATED
-            pushToast(
-                'success',
-                `Checkout created · Total $${gross} ${currency}`
-            );
+            pushToast('success', `Checkout created · Total $${gross} ${currency}`);
 
         } catch (err) {
-            console.error(err);
+            console.error('❌ Error in createCheckout:', err);
             pushToast('error', 'Failed to create checkout');
         } finally {
             setCreatingCheckout(false);
+            console.log('🏁 createCheckout finished');
         }
     };
-
 
     return (
         <div className="space-y-16">
@@ -502,20 +490,17 @@ export function CheckoutLogic({
             {!paymentOpen ? (
                 <button
                     disabled={!shippingValid || updatingTax || creatingCheckout || paymentOpen}
-                    onClick={createCheckout}  // ← Изменяем обработчик
+                    onClick={createCheckout}
                     className="bg-[#2B3A4A] text-white px-4 py-3 text-sm uppercase rounded-sm mb-12 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {creatingCheckout ? 'Creating checkout…' :
                         updatingTax ? 'Calculating tax…' : 'PAYMENT'}
                 </button>
-            ) : !clientSecret ? (
-                <p className="text-sm text-gray-500">Preparing payment…</p>
             ) : !checkout ? (
                 <p className="text-sm text-gray-500">Preparing checkout…</p>
             ) : (
-                <StripeProvider clientSecret={clientSecret}>
+                <StripeProvider>
                     <PayForm
-                        clientSecret={clientSecret}
                         billing={billing}
                         setBilling={setBilling}
                         taxReady={taxReady}

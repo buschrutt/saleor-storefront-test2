@@ -1,0 +1,21 @@
+mutation TransactionCapture($transactionId: ID!, $amount: PositiveDecimal!) {
+    transactionRequestAction(
+        id: $transactionId
+        actionType: CHARGE
+        amount: $amount
+    ) {
+        transaction {
+            id
+            actions
+            chargedAmount {
+                amount
+                currency
+            }
+        }
+        errors {
+            field
+            message
+            code
+        }
+    }
+}

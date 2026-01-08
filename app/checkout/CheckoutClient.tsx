@@ -8,6 +8,7 @@ import type { Billing, Address } from '@/types/checkout'
 import { useToast } from '@/app/components/useToast'
 import ToastContainer from '@/app/components/ToastContainer'
 import type { Checkout } from '@/lib/graphql/mutations/checkoutCreateList'
+import StripeProvider from './StripeProvider' // 👈 Импортируем
 
 /* =========================
    Types
@@ -52,7 +53,6 @@ export default function CheckoutClient({
     const [checkout, setCheckout] = useState<Checkout | null>(null)
     const [leftColumn, setLeftColumn] = useState<LeftColumn | null>(null)
 
-    const [clientSecret, setClientSecret] = useState<string>()
     const [taxReady, setTaxReady] = useState(false)
     const [updatingTax, setUpdatingTax] = useState(false)
 
@@ -93,41 +93,6 @@ export default function CheckoutClient({
             .then(data => setUser(data.user))
             .catch(() => setUser(null))
     }, [])
-
-    /* =========================
-       CREATE PAYMENT INTENT
-       =========================
-    */
-    useEffect(() => {
-        if (!taxReady) return;
-        if (!checkout?.totalPrice?.gross?.amount) return;
-        if (clientSecret) return;
-
-        const currency =
-            checkout.totalPrice.gross.currency ??
-            leftColumn?.basePrice.currency ??
-            'USD';
-
-        fetch('/api/checkout/complete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                amount: checkout.totalPrice.gross.amount,
-                currency: currency.toLowerCase(),
-            }),
-        })
-            .then(r => r.json())
-            .then(d => {
-                if (!d.clientSecret) {
-                    throw new Error('No clientSecret returned');
-                }
-                setClientSecret(d.clientSecret);
-            })
-            .catch(err => {
-                console.error('PaymentIntent error', err);
-                pushToast('error', 'Failed to prepare payment');
-            });
-    }, [taxReady, checkout, clientSecret, leftColumn, pushToast]);
 
     /* =========================
        Safe totals
@@ -264,20 +229,22 @@ export default function CheckoutClient({
                             currency={currency}
                         />
 
-                        <CheckoutLogic
-                            user={user}
-                            address={address}
-                            setAddress={setAddress}
-                            billing={billing}
-                            setBilling={setBilling}
-                            clientSecret={clientSecret}
-                            taxReady={taxReady}
-                            updatingTax={updatingTax}
-                            updateTaxFromAddress={updateTaxFromAddress}
-                            checkout={checkout}
-                            setCheckout={setCheckout}
-                            setTaxReady={setTaxReady}
-                        />
+                        {/* 🔴 ВАЖНО: Оборачиваем только CheckoutLogic в StripeProvider */}
+                        <StripeProvider>
+                            <CheckoutLogic
+                                user={user}
+                                address={address}
+                                setAddress={setAddress}
+                                billing={billing}
+                                setBilling={setBilling}
+                                taxReady={taxReady}
+                                updatingTax={updatingTax}
+                                updateTaxFromAddress={updateTaxFromAddress}
+                                checkout={checkout}
+                                setCheckout={setCheckout}
+                                setTaxReady={setTaxReady}
+                            />
+                        </StripeProvider>
                     </div>
                 </>
             )}
