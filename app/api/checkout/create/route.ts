@@ -1,46 +1,33 @@
 import { NextResponse } from 'next/server'
-import { saleorFetch } from '@/lib/saleor'
-import {
-    PRODUCT_INFO_MUTATION,
-    type CheckoutCreateVariables,
-    type CheckoutCreateResult
-} from '@/lib/graphql/mutations/productInfo'
+import checkoutCreateList from '@/lib/graphql/mutations/checkoutCreateList'
 
-const CHANNEL = 'default-channel'
 const VARIANT_ID = 'UHJvZHVjdFZhcmlhbnQ6MQ=='
 
-export async function POST() {
+export async function POST(req: Request) {
     try {
-        const variables: CheckoutCreateVariables = {
-            channel: CHANNEL,
-            lines: [
-                {
-                    variantId: VARIANT_ID,
-                    quantity: 1,
-                },
-            ],
-        }
+        const body = await req.json()
 
-        const data = await saleorFetch<CheckoutCreateResult>({
-            query: PRODUCT_INFO_MUTATION,
-            variables,
-        })
+        const { address, deliveryMethodId } = body
 
-        const result = data.checkoutCreate
-
-        if (result.errors.length || !result.checkout) {
-            console.error('checkoutCreate errors:', result.errors)
+        if (!address) {
             return NextResponse.json(
-                { error: 'Checkout create failed' },
+                { error: 'Address is required' },
                 { status: 400 }
             )
         }
 
-        return NextResponse.json(result.checkout)
+        const result = await checkoutCreateList(
+            VARIANT_ID,
+            address,
+            deliveryMethodId
+        )
+
+        return NextResponse.json(result)
     } catch (error) {
-        console.error('checkoutCreate exception:', error)
+        console.error('checkoutCreate route error:', error)
+
         return NextResponse.json(
-            { error: 'Saleor checkoutCreate failed' },
+            { error: error instanceof Error ? error.message : 'Checkout create failed' },
             { status: 500 }
         )
     }

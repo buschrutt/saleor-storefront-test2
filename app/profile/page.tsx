@@ -27,7 +27,7 @@ function FormField({
                 type={type}
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
-                className="w-full bg-transparent outline-none text-sm"
+                className="w-full bg-transparent outline-none text-sm h-10"
                 autoComplete="off"
             />
         </fieldset>

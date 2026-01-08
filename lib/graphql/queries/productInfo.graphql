@@ -1,0 +1,27 @@
+query GetVariantInfo($id: ID!) {
+    productVariant(id: $id) {
+        id
+        name
+        product {
+            id
+            name
+            description
+            media {
+                url
+                alt
+            }
+        }
+        pricing {
+            price {
+                net {
+                    amount
+                    currency
+                }
+                gross {
+                    amount
+                    currency
+                }
+            }
+        }
+    }
+}

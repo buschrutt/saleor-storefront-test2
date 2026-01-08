@@ -1,0 +1,13 @@
+mutation ProcessTransaction($transactionId: ID!) {
+    transactionProcess(id: $transactionId) {
+        transaction {
+            id
+        }
+        data
+        errors {
+            field
+            message
+            code
+        }
+    }
+}

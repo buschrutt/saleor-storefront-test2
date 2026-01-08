@@ -1,0 +1,38 @@
+mutation CheckoutDeliveryMethodUpdate(
+    $checkoutId: ID!
+    $deliveryMethodId: ID!
+) {
+    checkoutDeliveryMethodUpdate(
+        id: $checkoutId
+        deliveryMethodId: $deliveryMethodId
+    ) {
+        checkout {
+            id
+            totalPrice {
+                gross {
+                    amount
+                    currency
+                }
+                tax {
+                    amount
+                }
+            }
+            shippingPrice {
+                gross {
+                    amount
+                }
+            }
+            shippingMethods {
+                id
+                name
+                price {
+                    amount
+                }
+            }
+        }
+        errors {
+            field
+            message
+        }
+    }
+}

@@ -1,0 +1,22 @@
+mutation RetrievePublishableKey($checkoutId: ID!, $amount: PositiveDecimal!) {
+    paymentGatewayInitialize(
+        id: $checkoutId
+        paymentGateways: {id: "saleor.app.payment.stripe"}
+        amount: $amount
+    ) {
+        gatewayConfigs {
+            id
+            data
+            errors {
+                field
+                message
+                code
+            }
+        }
+        errors {
+            field
+            message
+            code
+        }
+    }
+}

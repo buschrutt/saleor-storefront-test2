@@ -7,29 +7,11 @@ import { CheckoutLogic } from './CheckoutLogic'
 import type { Billing, Address } from '@/types/checkout'
 import { useToast } from '@/app/components/useToast'
 import ToastContainer from '@/app/components/ToastContainer'
+import type { Checkout } from '@/lib/graphql/mutations/checkoutCreateList'
 
 /* =========================
    Types
    ========================= */
-
-type CheckoutUser = {
-    email: string
-}
-
-type Money = {
-    amount: number
-    currency: string
-}
-
-type Checkout = {
-    id: string
-    user?: CheckoutUser | null
-    shippingAddress?: Address | null
-    totalPrice?: {
-        net?: { amount: number }
-        gross?: Money
-    }
-}
 
 type CheckoutImage = {
     imageUrl: string
@@ -57,7 +39,6 @@ type LeftColumn = {
    ========================= */
 
 export default function CheckoutClient({
-                                           checkoutImage,
                                        }: {
     checkoutImage: CheckoutImage
 }) {
@@ -114,38 +95,39 @@ export default function CheckoutClient({
     }, [])
 
     /* =========================
-       Create checkout
-       ========================= */
-    useEffect(() => {
-        fetch('/api/checkout/create', { method: 'POST' })
-            .then(r => r.json())
-            .then(setCheckout)
-            .catch(console.error)
-    }, [])
-
-    /* =========================
        CREATE PAYMENT INTENT
        =========================
     */
     useEffect(() => {
-        if (!taxReady) return
-        if (!checkout?.totalPrice?.gross) return
-        if (clientSecret) return //
+        if (!taxReady) return;
+        if (!checkout?.totalPrice?.gross?.amount) return;
+        if (clientSecret) return;
+
+        const currency =
+            checkout.totalPrice.gross.currency ??
+            leftColumn?.basePrice.currency ??
+            'USD';
 
         fetch('/api/checkout/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 amount: checkout.totalPrice.gross.amount,
-                currency: checkout.totalPrice.gross.currency.toLowerCase(),
+                currency: currency.toLowerCase(),
             }),
         })
             .then(r => r.json())
-            .then(d => setClientSecret(d.clientSecret))
-            .catch(() =>
-                pushToast('error', 'Failed to prepare payment')
-            )
-    }, [taxReady, checkout, pushToast])
+            .then(d => {
+                if (!d.clientSecret) {
+                    throw new Error('No clientSecret returned');
+                }
+                setClientSecret(d.clientSecret);
+            })
+            .catch(err => {
+                console.error('PaymentIntent error', err);
+                pushToast('error', 'Failed to prepare payment');
+            });
+    }, [taxReady, checkout, clientSecret, leftColumn, pushToast]);
 
     /* =========================
        Safe totals
@@ -234,17 +216,8 @@ export default function CheckoutClient({
         <main className="min-h-screen bg-gray-100 px-6 pt-24">
             <ToastContainer toasts={toasts} onClose={closeToast} />
 
-            {/* HARD LOADING ONLY */}
-            {(!checkout || !leftColumn) && (
-                <div className="flex items-center justify-center h-[60vh]">
-                    <p className="text-sm text-gray-500">
-                        Loading checkout…
-                    </p>
-                </div>
-            )}
-
             {/* MAIN UI (ALWAYS VISIBLE) */}
-            {checkout && leftColumn && (
+            {leftColumn && (
                 <>
                     {/* NAV */}
                     <div className="max-w-6xl mx-auto mb-6 flex gap-3">
@@ -293,7 +266,6 @@ export default function CheckoutClient({
 
                         <CheckoutLogic
                             user={user}
-                            checkout={checkout}
                             address={address}
                             setAddress={setAddress}
                             billing={billing}
@@ -302,6 +274,9 @@ export default function CheckoutClient({
                             taxReady={taxReady}
                             updatingTax={updatingTax}
                             updateTaxFromAddress={updateTaxFromAddress}
+                            checkout={checkout}
+                            setCheckout={setCheckout}
+                            setTaxReady={setTaxReady}
                         />
                     </div>
                 </>

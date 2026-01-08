@@ -1,0 +1,22 @@
+mutation InitializeTransaction(
+    $checkoutId: ID!
+    $data: JSON
+    $paymentGatewayId: String!
+    $amount: PositiveDecimal!
+) {
+    transactionInitialize(
+        id: $checkoutId
+        paymentGateway: { id: $paymentGatewayId, data: $data }
+        amount: $amount
+    ) {
+        transaction {
+            id
+        }
+        data
+        errors {
+            field
+            message
+            code
+        }
+    }
+}

@@ -1,0 +1,23 @@
+mutation CreateCheckout(
+    $channel: String!
+    $lines: [CheckoutLineInput!]!
+) {
+    checkoutCreate(
+        input: {
+            channel: $channel
+            lines: $lines
+        }
+    ) {
+        checkout {
+            id
+            totalPrice {
+                net { amount }
+                gross { amount currency }
+            }
+        }
+        errors {
+            field
+            message
+        }
+    }
+}

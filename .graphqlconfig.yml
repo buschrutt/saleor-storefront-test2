@@ -1,0 +1,6 @@
+projects:
+  default:
+    schema:
+      - https://buschrutt-saleor-api.fly.dev/graphql/
+    documents:
+      - "**/*.graphql"

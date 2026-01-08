@@ -1,28 +1,6 @@
-export const PRODUCT_INFO_MUTATION = `
-  mutation CreateCheckout(
-    $channel: String!
-    $lines: [CheckoutLineInput!]!
-  ) {
-    checkoutCreate(
-      input: {
-        channel: $channel
-        lines: $lines
-      }
-    ) {
-      checkout {
-        id
-        totalPrice {
-          net { amount }
-          gross { amount currency }
-        }
-      }
-      errors {
-        field
-        message
-      }
-    }
-  }
-`;
+import { importGraphQL } from '../utils/importGraphQL';
+
+export const PRODUCT_INFO_MUTATION = importGraphQL('lib/graphql/queries/productInfo.graphql');
 
 export type CheckoutCreateVariables = {
     channel: string;
