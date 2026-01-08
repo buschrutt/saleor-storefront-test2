@@ -75,16 +75,23 @@ function PayForm({
                      billing,
                      setBilling,
                      taxReady,
+                     checkout,
+                     address,
+                     user,
+                     pushToast,
                  }: {
     clientSecret: string;
     billing: Billing;
     setBilling: React.Dispatch<React.SetStateAction<Billing>>;
     taxReady: boolean;
+    checkout: Checkout;
+    address: Address;
+    user: User;
+    pushToast: (type: 'success' | 'error' | 'info', message: string) => void;
 }) {
     const stripe = useStripe();
     const elements = useElements();
     const router = useRouter();
-    const { pushToast } = useToast();
     const [paying, setPaying] = React.useState(false);
 
     async function pay() {
@@ -100,8 +107,15 @@ function PayForm({
             return;
         }
 
-        setPaying(true);
+        if (!checkout?.id) {
+            pushToast('error', 'Checkout missing');
+            return;
+        }
 
+        setPaying(true);
+        pushToast('info', 'Processing payment…');
+
+        /* 1️⃣ Stripe confirm */
         const result = await stripe.confirmCardPayment(clientSecret, {
             payment_method: {
                 card: elements.getElement(CardNumberElement)!,
@@ -119,11 +133,67 @@ function PayForm({
         if (result.error) {
             pushToast('error', result.error.message ?? 'Payment failed');
             setPaying(false);
-        } else {
-            pushToast('success', 'Payment successful');
-            router.push('/profile');
+            return;
         }
+
+        const paymentIntentId = result.paymentIntent?.id;
+
+        if (!paymentIntentId) {
+            pushToast('error', 'PaymentIntent missing');
+            setPaying(false);
+            return;
+        }
+
+        /* 2️⃣ SALEOR PAYMENT FLOW */
+        const res = await fetch('/api/checkout/payment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                checkoutId: checkout.id,
+                email: user.email, // 👈 ВОТ ЭТА СТРОКА, ИМЕННО ТУТ
+                billingAddress: {
+                    firstName: billing.firstName,
+                    lastName: billing.lastName,
+                    streetAddress1: address.streetAddress1,
+                    streetAddress2: address.streetAddress2,
+                    city: address.city,
+                    countryArea: address.countryArea,
+                    postalCode: address.postalCode,
+                    country: address.country,
+                },
+                amount: checkout.totalPrice?.gross?.amount,
+                paymentData: {
+                    paymentIntent: paymentIntentId,
+                    status: 'SUCCESS',
+                },
+            }),
+        });
+
+        const data = await res.json();
+
+        const orderId = data.orderId;
+
+        const total =
+            checkout.totalPrice?.gross?.amount ??
+            checkout.totalPrice?.net?.amount ??
+            0;
+
+        const currency =
+            checkout.totalPrice?.gross?.currency ??
+            'USD';
+
+        /* 🎉 SUCCESS TOAST */
+        pushToast(
+            'success',
+            `Order ${orderId} created · $${total} ${currency}`
+        );
+
+        /* ⏳ DELAY → REDIRECT */
+        setTimeout(() => {
+            router.push('/profile');
+        }, 3000);
     }
+
 
     return (
         <section className="pt-12 pb-12 border-t border-gray-200 space-y-6">
@@ -440,6 +510,8 @@ export function CheckoutLogic({
                 </button>
             ) : !clientSecret ? (
                 <p className="text-sm text-gray-500">Preparing payment…</p>
+            ) : !checkout ? (
+                <p className="text-sm text-gray-500">Preparing checkout…</p>
             ) : (
                 <StripeProvider clientSecret={clientSecret}>
                     <PayForm
@@ -447,6 +519,10 @@ export function CheckoutLogic({
                         billing={billing}
                         setBilling={setBilling}
                         taxReady={taxReady}
+                        checkout={checkout}
+                        address={address}
+                        user={user}
+                        pushToast={pushToast}
                     />
                 </StripeProvider>
             )}
