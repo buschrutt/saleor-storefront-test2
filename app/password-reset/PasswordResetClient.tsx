@@ -210,7 +210,7 @@ export default function PasswordResetClient() {
                         className="flex items-center gap-2 uppercase text-sm tracking-wide disabled:opacity-50"
                         type="button"
                     >
-                        <span>{loading ? 'Saving…' : 'Save Password'}</span>
+                        <span>{loading ? 'Saving… ' : 'Save Password'}</span>
                         <span>→</span>
                     </button>
                 </div>
