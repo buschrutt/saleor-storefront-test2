@@ -9,11 +9,17 @@ export async function saleorFetch<T>({
                                          variables,
                                          headers = {},
                                      }: SaleorFetchArgs<T>): Promise<T> {
-    if (!process.env.SALEOR_API_URL) {
-        throw new Error('SALEOR_API_URL is not defined')
+    // ИСПРАВЛЕНО: используем NEXT_PUBLIC_ префикс для клиента
+    const SALEOR_API_URL = process.env.NEXT_PUBLIC_SALEOR_API_URL
+
+    if (!SALEOR_API_URL) {
+        console.error('NEXT_PUBLIC_SALEOR_API_URL is not defined')
+        throw new Error('NEXT_PUBLIC_SALEOR_API_URL is not defined')
     }
 
-    const res = await fetch(process.env.SALEOR_API_URL, {
+    console.log('Calling Saleor API:', SALEOR_API_URL) // Для отладки
+
+    const res = await fetch(SALEOR_API_URL, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

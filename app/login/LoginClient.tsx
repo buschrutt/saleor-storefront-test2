@@ -15,6 +15,9 @@ type Toast = {
     message: string
 }
 
+const STOREFRONT_URL =
+    process.env.NEXT_PUBLIC_STOREFRONT_URL || 'http://localhost:3000'
+
 function ToastContainer({
                             toasts,
                             onClose,
@@ -27,8 +30,7 @@ function ToastContainer({
             {toasts.map((toast) => (
                 <div
                     key={toast.id}
-                    className={`relative px-5 py-4 pr-10 rounded-md text-sm
-                    ${
+                    className={`relative px-5 py-4 pr-10 rounded-md text-sm ${
                         toast.type === 'error'
                             ? 'bg-red-600 text-red-50'
                             : toast.type === 'success'
@@ -41,6 +43,8 @@ function ToastContainer({
                     <button
                         onClick={() => onClose(toast.id)}
                         className="absolute top-2 right-3 text-xs opacity-70 hover:opacity-100"
+                        type="button"
+                        aria-label="Close"
                     >
                         ✕
                     </button>
@@ -84,10 +88,16 @@ function FormField({
 /* =========================
    Login form
    ========================= */
-function LoginForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void }) {
+function LoginForm({
+                       pushToast,
+                   }: {
+    pushToast: (t: ToastType, m: string) => void
+}) {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
+    const [recoveryEmail, setRecoveryEmail] = useState('')
     const [loading, setLoading] = useState(false)
+    const [recoveryLoading, setRecoveryLoading] = useState(false)
 
     async function signIn() {
         setLoading(true)
@@ -99,10 +109,10 @@ function LoginForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void
                 body: JSON.stringify({ email, password }),
             })
 
-            const data = await res.json()
+            const data = await res.json().catch(() => null)
 
             if (!res.ok) {
-                pushToast('error', data.error || 'Invalid credentials')
+                pushToast('error', data?.error || 'Invalid credentials')
                 return
             }
 
@@ -115,8 +125,58 @@ function LoginForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void
         }
     }
 
+    async function recovery() {
+        const cleanEmail = recoveryEmail.trim()
+        if (!cleanEmail) {
+            pushToast('error', 'Enter your email')
+            return
+        }
+
+        setRecoveryLoading(true)
+
+        try {
+            const redirectUrl = `${STOREFRONT_URL}/password-reset`
+
+            const result = await saleorFetch<{
+                requestPasswordReset: { errors: { message: string }[] }
+            }>({
+                query: `
+          mutation RequestPasswordReset($email: String!, $redirectUrl: String!) {
+            requestPasswordReset(email: $email, redirectUrl: $redirectUrl) {
+              errors { message }
+            }
+          }
+        `,
+                variables: {
+                    email: cleanEmail,
+                    redirectUrl,
+                },
+            })
+
+            // Saleor часто возвращает success даже когда email не существует — это нормально.
+            if (result.requestPasswordReset.errors?.length) {
+                pushToast('error', result.requestPasswordReset.errors[0].message)
+                return
+            }
+
+            // Правильный UX: не раскрываем, существует ли email.
+            pushToast(
+                'success',
+                'If this email exists, a recovery link has been sent. Check your inbox and spam folder.'
+            )
+            setRecoveryEmail('')
+        } catch (e) {
+            // Оставим один “тихий” лог для дебага, без спама в консоль
+            console.error(e)
+            pushToast('error', 'Password recovery failed')
+        } finally {
+            setRecoveryLoading(false)
+        }
+    }
+
     return (
         <div className="space-y-6">
+            {/* SIGN IN */}
             <FormField label="Your Email (Login)" value={email} onChange={setEmail} />
             <FormField
                 label="Password"
@@ -128,10 +188,33 @@ function LoginForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void
             <button
                 onClick={signIn}
                 disabled={loading}
-                className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
+                className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition disabled:opacity-60"
+                type="button"
             >
                 {loading ? 'Signing In…' : 'Sign In'}
             </button>
+
+            {/* PASSWORD RECOVERY */}
+            <div className="space-y-6 pt-8">
+                <div className="text-sm uppercase tracking-wide text-gray-600">
+                    Password Recovery
+                </div>
+
+                <FormField
+                    label="Email for recovery"
+                    value={recoveryEmail}
+                    onChange={setRecoveryEmail}
+                />
+
+                <button
+                    onClick={recovery}
+                    disabled={recoveryLoading}
+                    className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition disabled:opacity-60"
+                    type="button"
+                >
+                    {recoveryLoading ? 'Sending…' : 'Recovery'}
+                </button>
+            </div>
         </div>
     )
 }
@@ -139,7 +222,11 @@ function LoginForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void
 /* =========================
    Register form
    ========================= */
-function RegisterForm({ pushToast }: { pushToast: (t: ToastType, m: string) => void }) {
+function RegisterForm({
+                          pushToast,
+                      }: {
+    pushToast: (t: ToastType, m: string) => void
+}) {
     const [email, setEmail] = useState('')
     const [firstName, setFirstName] = useState('')
     const [lastName, setLastName] = useState('')
@@ -156,31 +243,36 @@ function RegisterForm({ pushToast }: { pushToast: (t: ToastType, m: string) => v
         setLoading(true)
         try {
             const result = await saleorFetch<{
-                accountRegister: {
-                    errors: { message: string }[]
-                }
+                accountRegister: { errors: { message: string }[] }
             }>({
                 query: `
-                    mutation Register(
-                      $email: String!
-                      $password: String!
-                      $firstName: String!
-                      $lastName: String!
-                    ) {
-                      accountRegister(
-                        input: {
-                          email: $email
-                          password: $password
-                          firstName: $firstName
-                          lastName: $lastName
-                          redirectUrl: "https://pacificmule.com/login"
-                        }
-                      ) {
-                        errors { message }
-                      }
-                    }
-                `,
-                variables: { email, password, firstName, lastName },
+          mutation Register(
+            $email: String!
+            $password: String!
+            $firstName: String!
+            $lastName: String!
+            $redirectUrl: String!
+          ) {
+            accountRegister(
+              input: {
+                email: $email
+                password: $password
+                firstName: $firstName
+                lastName: $lastName
+                redirectUrl: $redirectUrl
+              }
+            ) {
+              errors { message }
+            }
+          }
+        `,
+                variables: {
+                    email,
+                    password,
+                    firstName,
+                    lastName,
+                    redirectUrl: `${STOREFRONT_URL}/login`,
+                },
             })
 
             if (result.accountRegister.errors.length) {
@@ -222,7 +314,8 @@ function RegisterForm({ pushToast }: { pushToast: (t: ToastType, m: string) => v
             <button
                 onClick={submit}
                 disabled={loading}
-                className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition"
+                className="bg-gray-700 text-white rounded-sm px-4 py-3 text-sm uppercase tracking-wide hover:bg-gray-800 transition disabled:opacity-60"
+                type="button"
             >
                 {loading ? 'Signing Up…' : 'Sign Up'}
             </button>
@@ -265,12 +358,12 @@ export default function LoginClient() {
                     confirmAccount: { errors: { message: string }[] }
                 }>({
                     query: `
-                        mutation ConfirmAccount($email: String!, $token: String!) {
-                          confirmAccount(email: $email, token: $token) {
-                            errors { message }
-                          }
-                        }
-                    `,
+            mutation ConfirmAccount($email: String!, $token: String!) {
+              confirmAccount(email: $email, token: $token) {
+                errors { message }
+              }
+            }
+          `,
                     variables: { email, token },
                 })
 
@@ -310,7 +403,6 @@ export default function LoginClient() {
                 </button>
             </div>
 
-
             <div className="max-w-6xl mx-auto pt-24 px-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                     <div>
@@ -328,7 +420,6 @@ export default function LoginClient() {
                     </div>
                 </div>
             </div>
-
         </main>
     )
 }

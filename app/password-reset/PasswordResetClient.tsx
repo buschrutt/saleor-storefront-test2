@@ -39,7 +39,7 @@ function ToastContainer({ toasts, onClose }: ToastContainerProps) {
                         aria-label="Close"
                         type="button"
                     >
-                        ✕
+
                     </button>
                     {toast.message}
                 </div>
